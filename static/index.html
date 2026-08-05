@@ -619,6 +619,12 @@
   .tabbar{flex-shrink:0;z-index:6}
   /* терминалу всегда оставляем читаемый кусок */
   #s-term .term-wrap{min-height:120px}
+  /* Панели, которым листаться нечем, вертикальный жест не принимают вовсе —
+     иначе протяг по ним уходит наверх и тянет видимую область целиком.
+     Листаться должно только то, у чего есть содержимое: вывод терминала. */
+  .term-head,.quickrow,.cmdbar,.kbdbar,.tabbar{touch-action:none}
+  .kbdbar-keys{touch-action:pan-x}
+  .kp-grid,.kp-hist{touch-action:pan-y}
 
   /* ── Набор команды: клавиатура телефона занимает низ экрана ──────────────
      Пока она открыта, наша панель клавиш и ряд быстрых действий прячутся —
@@ -628,9 +634,13 @@
   /* Строка делится на две части: клавиши прокручиваются в СВОЁМ контейнере,
      кнопка «скрыть» лежит рядом и вне прокрутки. Раньше она была sticky
      внутри общей прокрутки, и клавиши уезжали ей под низ. */
+  /* Строка клавиш стоит НАД полем команды и раньше сливалась с ним: разделяла
+     их только пустота. Теперь у неё своя подложка, рамки сверху и снизу и
+     собственный отступ — граница между «клавиши» и «ввод» видна однозначно. */
   .kbdbar{display:none;gap:var(--s2);align-items:center;
-    padding:var(--s2) var(--s3);background:var(--bg);
-    border-top:1px solid var(--border);flex-shrink:0}
+    padding:var(--s2) var(--s3);background:var(--bg1);
+    border-top:1px solid var(--border);border-bottom:1px solid var(--border);
+    margin-bottom:var(--s3);flex-shrink:0}
   .kbdbar-keys{flex:1;min-width:0;display:flex;gap:var(--s2);
     overflow-x:auto;scrollbar-width:none;
     /* последний клавише даём дотянуться до края, но не под соседа */
@@ -2770,11 +2780,19 @@ function applyViewport(){
   _vpFrame=0;
   const vv=window.visualViewport;
   const h=vv?vv.height:window.innerHeight;
-  const top=vv?vv.offsetTop:0;
   document.documentElement.style.setProperty('--vh',h+'px');
-  // прижимаем body ровно к видимой области (учитывая сдвиг под клавиатурой)
-  document.body.style.top=top+'px';
+  /* Страницу НЕ двигаем вслед за смещением вьюпорта.
+
+     Раньше здесь стояло body.style.top = visualViewport.offsetTop. С открытой
+     клавиатурой любой протяг пальцем сдвигает видимую область, приходит
+     событие scroll, мы двигаем страницу следом — и этот сдвиг снова меняет
+     смещение. Петля обратной связи: содержимое ехало само, да ещё в обратную
+     сторону от пальца. Вместо этого держим страницу прибитой к нулю и гасим
+     любую попытку прокрутить её целиком — листаться должно только то, на чём
+     начат жест: вывод терминала, лента чата, дерево файлов. */
+  document.body.style.top='0px';
   if(window.scrollY||window.scrollX)window.scrollTo(0,0);
+  if(vv && vv.offsetTop) window.scrollTo(0,0);
   updateKbdState(h);
 }
 
@@ -2817,7 +2835,12 @@ function fitViewport(){
 if(window.visualViewport){
   // passive: браузер не ждёт от нас preventDefault и не тормозит прокрутку
   window.visualViewport.addEventListener('resize',fitViewport,{passive:true});
-  window.visualViewport.addEventListener('scroll',fitViewport,{passive:true});
+  // Сдвиг видимой области возвращаем на место сразу, а не через кадр: через
+  // requestAnimationFrame успевает мелькнуть сам сдвиг, и это читается как
+  // «страница едет».
+  window.visualViewport.addEventListener('scroll',()=>{
+    if(window.scrollY||window.scrollX)window.scrollTo(0,0);
+  },{passive:true});
 }
 window.addEventListener('resize',fitViewport,{passive:true});
 window.addEventListener('orientationchange',()=>setTimeout(fitViewport,300));
