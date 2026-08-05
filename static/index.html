@@ -2,11 +2,11 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<!-- interactive-widget: где поддерживается (Chrome, а значит Telegram на
-     Android), браузер сам ужимает страницу под клавиатуру. Тогда нам не надо
-     пересчитывать высоту покадрово из JS — а именно этот пересчёт и заставляет
-     каретку в поле дрожать, а фон под кнопками перерисовываться рывками. -->
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
+<!-- interactive-widget НЕ ставим. Он заставляет браузер ужимать страницу под
+     клавиатуру самостоятельно, а мы вдобавок задаём высоту из JS — две
+     компенсации накладываются и качают раскладку туда-обратно. Высотой
+     управляем только мы, в одном месте. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>CodePocket</title>
@@ -1318,7 +1318,7 @@
         <button class="attbtn" id="attBtn" title="Прикрепить фото или файл"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5 12.4 19a4.6 4.6 0 0 1-6.5-6.5l7.9-7.9a3.1 3.1 0 0 1 4.4 4.4l-7.9 7.9a1.6 1.6 0 0 1-2.2-2.2l7.2-7.2"/></svg></button>
         <input type="file" id="attFile" class="hidden" multiple accept="image/*,.txt,.md,.json,.csv,.log,.py,.js,.ts,.html,.css,.pdf,.zip">
         <button class="kbd-off" title="Скрыть клавиатуру"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
-        <textarea id="chatInp" placeholder="Что сделать с кодом? (Claude)" rows="1"></textarea>
+        <textarea id="chatInp" placeholder="Что сделать с кодом?" rows="1"></textarea>
         <button id="chatSend" title="Отправить"><svg viewBox="0 0 24 24" fill="currentColor" style="width:20px;height:20px"><path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12 2-12 2z"/></svg></button>
       </div>
     </div>
@@ -1335,7 +1335,7 @@
         <button class="attbtn" id="attBtnCx" title="Прикрепить фото или файл"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5 12.4 19a4.6 4.6 0 0 1-6.5-6.5l7.9-7.9a3.1 3.1 0 0 1 4.4 4.4l-7.9 7.9a1.6 1.6 0 0 1-2.2-2.2l7.2-7.2"/></svg></button>
         <input type="file" id="attFileCx" class="hidden" multiple accept="image/*,.txt,.md,.json,.csv,.log,.py,.js,.ts,.html,.css,.pdf,.zip">
         <button class="kbd-off" title="Скрыть клавиатуру"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
-        <textarea id="chatInpCx" placeholder="Что сделать с кодом? (Codex)" rows="1"></textarea>
+        <textarea id="chatInpCx" placeholder="Что сделать с кодом?" rows="1"></textarea>
         <button id="chatSendCx" title="Отправить"><svg viewBox="0 0 24 24" fill="currentColor" style="width:20px;height:20px"><path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12 2-12 2z"/></svg></button>
       </div>
     </div>
@@ -2874,20 +2874,42 @@ $('pvReload').onclick=async()=>{const p=$('pvFrame').dataset.path;if(!p)return;
    (resize терминала, refresh редактора) — один раз, когда движение улеглось. */
 let _vpFrame=0, _vpSettle=0;
 
-let _vhApplied=-1;
+let _vhApplied=-1, _vhTimer=0;
+
+/* Высоту страницы меняем ОДИН раз — когда клавиатура доехала, а не каждый кадр
+   пока она едет.
+
+   Раньше мы следовали за анимацией: на каждое событие вьюпорта переписывали
+   --vh, а это перекладывает весь нижний блок. Значения во время движения
+   приходят дробные и неровные, поэтому поле ввода (а с ним и каретка) ходило
+   вверх-вниз. Уменьшение числа записей помогало, но не убирало причину:
+   следовать за анимацией покадрово — и есть причина.
+
+   Теперь запись откладывается, пока высота не перестанет меняться. Пока
+   клавиатура едет, раскладка стоит на месте и ничего не виляет; в конце
+   происходит один переход. Класс «клавиатура на экране» ставится сразу — он
+   ничего не двигает, только прячет лишние панели. */
+function commitHeight(h){
+  const hr = Math.round(h);
+  if(hr === _vhApplied) return;
+  _vhApplied = hr;
+  document.documentElement.style.setProperty('--vh',hr+'px');
+  sendResize();
+  if(cm)cm.refresh();
+}
+function scheduleHeight(h){
+  clearTimeout(_vhTimer);
+  // 110 мс тишины = движение закончилось. Меньше — снова ловим промежуточные
+  // кадры, больше — заметная задержка после закрытия клавиатуры.
+  _vhTimer = setTimeout(()=>{ _vhTimer=0; commitHeight(h); }, 110);
+}
+
 function applyViewport(){
   _vpFrame=0;
   const vv=window.visualViewport;
   const h=vv?vv.height:window.innerHeight;
-  // Пишем высоту, только когда она реально изменилась больше чем на пиксель.
-  // Каждая запись --vh перекладывает весь нижний блок; на дробных значениях
-  // во время анимации это происходило по нескольку раз на кадр — отсюда и
-  // дрожь каретки, и рваная перерисовка фона под кнопками.
-  const hr = Math.round(h);
-  if(hr !== _vhApplied){
-    _vhApplied = hr;
-    document.documentElement.style.setProperty('--vh',hr+'px');
-  }
+  if(_vhApplied < 0) commitHeight(h);   // первый запуск — сразу
+  else scheduleHeight(h);
   /* Страницу НЕ двигаем вслед за смещением вьюпорта.
 
      Раньше здесь стояло body.style.top = visualViewport.offsetTop. С открытой
@@ -2938,15 +2960,11 @@ function updateKbdState(h){
 }
 // поворот экрана меняет полную высоту — ориентир сбрасываем
 window.addEventListener('orientationchange',()=>{ _kbFull = 0; });
-function settleViewport(){
-  _vpSettle=0;
-  sendResize();
-  if(cm)cm.refresh();
-}
+// resize терминала и пересчёт редактора делает commitHeight — ровно один раз,
+// вместе с самой высотой. Отдельный «доводчик» больше не нужен.
+function settleViewport(){ _vpSettle=0; }
 function fitViewport(){
   if(!_vpFrame)_vpFrame=requestAnimationFrame(applyViewport);
-  clearTimeout(_vpSettle);
-  _vpSettle=setTimeout(settleViewport,140);   // движение прекратилось
 }
 if(window.visualViewport){
   // passive: браузер не ждёт от нас preventDefault и не тормозит прокрутку
@@ -2998,13 +3016,15 @@ applyViewport(); settleViewport();
     // Снимаем не сразу: клавиатура ещё уезжает, место не освободилось.
     // Ждём, пока высота вернётся, но не дольше секунды — на случай, если
     // событий вьюпорта не будет вовсе.
-    setTimeout(()=>{
+    // Состояние пересчитываем по реальной высоте, а не «раз фокус ушёл, значит
+    // клавиатуры нет». Когда касаешься терминала, фокус уходит в его скрытое
+    // поле — оно за настоящее не считается, и прежний код через секунду
+    // безусловно снимал класс: клавиатура ещё на экране, а нижнее меню и
+    // панель клавиш уже вылезали поверх неё.
+    [100, 400, 1000].forEach(t=>setTimeout(()=>{
       const vv=window.visualViewport;
       updateKbdState(vv?vv.height:window.innerHeight);
-    },100);
-    setTimeout(()=>{
-      if(!isField(document.activeElement))document.body.classList.remove('kbd');
-    },1000);
+    },t));
   },true);
 })();
 

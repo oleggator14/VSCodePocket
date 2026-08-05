@@ -234,6 +234,25 @@ class KeyboardState(unittest.TestCase):
                       "класс снялся, пока клавиатура ещё уезжала")
         self.assertIn("done:false", r.stdout)
 
+    def test_terminal_focus_keeps_kbd_state(self):
+        """Касание терминала уводит фокус в его СКРЫТОЕ поле. Настоящим полем
+        оно не считается — но клавиатура при этом на экране, и панели вылезать
+        не должны. Раньше состояние снималось, и поверх клавиатуры выезжали
+        нижнее меню и панель клавиш."""
+        r = self._run(
+            "global.innerHeight=800;\n"
+            "updateKbdState(800);\n"
+            "updateKbdState(500); console.log('typing:'+CLS.has('kbd'));\n"
+            # фокус ушёл в скрытое поле терминала: настоящего поля нет,
+            # но высота всё ещё просевшая
+            "updateKbdState(500); console.log('terminal:'+CLS.has('kbd'));\n"
+            "updateKbdState(800); console.log('closed:'+CLS.has('kbd'));\n")
+        self.assertEqual(r.returncode, 0, r.stderr[-400:])
+        self.assertIn("typing:true", r.stdout)
+        self.assertIn("terminal:true", r.stdout,
+                      "панели вылезли поверх открытой клавиатуры")
+        self.assertIn("closed:false", r.stdout)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
