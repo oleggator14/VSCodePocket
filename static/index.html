@@ -269,10 +269,21 @@
   .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:80;display:none;
     align-items:center;justify-content:center;padding:var(--s5)}
   .modal.on{display:flex}
+  /* Высота считается от РЕАЛЬНО видимой области (--vh, её ведёт visualViewport),
+     а не от 90vh: при открытой клавиатуре 90vh — это девять десятых экрана
+     вместе с клавиатурой, и карточка вылезала под неё. */
   .modal-card{width:100%;max-width:400px;background:var(--card);
     border:1px solid var(--border);border-radius:var(--r-xl);padding:var(--s4);
-    display:flex;flex-direction:column;gap:var(--s3);max-height:90vh;overflow:auto;
-    box-shadow:var(--sh-2)}
+    display:flex;flex-direction:column;gap:var(--s3);
+    max-height:calc(var(--vh,100vh) - var(--s5) * 2);overflow:auto;
+    box-shadow:var(--sh-2);overscroll-behavior:contain}
+  /* Дети карточки не сжимаются. Это и есть причина «поле ключа сужается»:
+     карточка — flex-колонка, у элементов по умолчанию flex-shrink:1, и когда
+     клавиатура забирала половину экрана, textarea с ключом схлопывалась
+     в полоску вместо того, чтобы карточка прокрутилась. */
+  .modal-card>*{flex-shrink:0}
+  /* при клавиатуре карточка прижимается к верху, а не центрируется */
+  body.kbd .modal{align-items:flex-start;padding-top:var(--s3)}
   .modal-card h3{font-size:var(--t-lg);font-weight:700}
   .modal-card textarea{resize:vertical;font-family:var(--mono);font-size:var(--t-sm)}
   .sheet{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:90;display:none;
@@ -280,7 +291,9 @@
   .sheet.on{display:flex}
   .sheet-card{width:100%;max-width:520px;border-radius:var(--r-xl) var(--r-xl) 0 0;
     padding:var(--s3) var(--s3) calc(var(--s3) + env(safe-area-inset-bottom));
-    display:flex;flex-direction:column;gap:var(--s2);max-height:80vh;overflow:auto}
+    display:flex;flex-direction:column;gap:var(--s2);
+    max-height:calc(var(--vh,100vh) * 0.8);overflow:auto;overscroll-behavior:contain}
+  .sheet-card>*{flex-shrink:0}
   .sheet-t{font-size:var(--t-sm);color:var(--dim);text-align:center;padding:var(--s1) 0}
   .sheet-body{display:flex;flex-direction:column;gap:var(--s2)}
   .sheet-item{width:100%;text-align:left;min-height:var(--tap);padding:var(--s3) var(--s4);
@@ -392,6 +405,20 @@
   .sh-badge.on{background:var(--green-soft);color:var(--green)}
   .sh-badge.off{background:var(--red-soft);color:var(--red)}
   .sh-div{height:1px;background:var(--border);margin:var(--s4) 0}
+  /* строка рабочей папки в карточке сервера */
+  .sh-folder{width:100%;display:flex;align-items:center;gap:var(--s3);
+    padding:var(--s3);margin-bottom:var(--s3);border-radius:var(--r);
+    background:var(--bg2);color:var(--fg);text-align:left;min-height:56px}
+  .sh-folder>svg:first-child{width:20px;height:20px;flex:0 0 auto;color:var(--accent)}
+  .shf-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+  .shf-l{font-size:var(--t-xs);text-transform:uppercase;letter-spacing:.06em;
+    font-weight:700;color:var(--dim-2)}
+  .shf-v{font-size:var(--t-sm);font-weight:600;font-family:var(--mono);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;direction:rtl;
+    text-align:left}
+  .shf-v.unset{font-family:var(--font);font-weight:500;color:var(--dim);direction:ltr}
+  .shf-chev{width:18px;height:18px;flex:0 0 auto;color:var(--dim-2)}
+  .sh-folder:active{background:var(--accent-soft)}
   .sh-actions{display:grid;grid-template-columns:1fr 1fr;gap:var(--s3)}
   .sh-act{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);
     padding:var(--s4);display:flex;flex-direction:column;align-items:flex-start;
@@ -471,7 +498,7 @@
   .acbox .ac.sel,.acbox .ac:active{background:var(--accent);color:var(--on-accent)}
   .acbox .ac .ty{color:var(--dim);font-size:10px;margin-left:var(--s2)}
   .acbox .ac.sel .ty{color:var(--on-accent)}
-  .palette-list{max-height:60vh;overflow:auto;display:flex;flex-direction:column;gap:2px}
+  .palette-list{max-height:calc(var(--vh,100vh) * 0.6);overflow:auto;display:flex;flex-direction:column;gap:2px}
   .palette-list .pi{min-height:var(--tap);padding:var(--s2) var(--s3);
     border-radius:var(--r-sm);font-size:var(--t-md);cursor:pointer;display:flex;
     align-items:center;gap:var(--s2)}
@@ -562,9 +589,9 @@
   .keypanel{background:var(--bg2);border-top:1px solid var(--border);
     padding:var(--s2) var(--s2) calc(var(--s2) + env(safe-area-inset-bottom));flex-shrink:0}
   .kp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));
-    gap:var(--s1);max-height:34vh;overflow:auto}
+    gap:var(--s1);max-height:calc(var(--vh,100vh) * 0.34);overflow:auto}
   .kp-grid .key{height:44px;padding:0}
-  .kp-hist{max-height:34vh;overflow:auto;display:flex;flex-direction:column;gap:var(--s1)}
+  .kp-hist{max-height:calc(var(--vh,100vh) * 0.34);overflow:auto;display:flex;flex-direction:column;gap:var(--s1)}
   .kp-hist .hrow{display:flex;align-items:center;gap:var(--s2);min-height:var(--tap);
     padding:0 var(--s3);border-radius:var(--r-sm);background:var(--bg3);
     border:1px solid var(--border);cursor:pointer}
@@ -826,6 +853,14 @@
     max-width:32ch;margin-bottom:var(--s2)}
   .auth-card input{min-height:50px}
   .auth-err{color:var(--red);font-size:var(--t-sm);min-height:16px}
+  /* ожидание входа через Telegram — вместо формы, которая ему не нужна */
+  .auth-wait{display:flex;flex-direction:column;align-items:center;gap:var(--s4);
+    color:var(--dim);font-size:var(--t-md)}
+  .auth-spin{width:26px;height:26px;border-radius:50%;
+    border:2.5px solid var(--bg3);border-top-color:var(--accent);
+    animation:authspin .7s linear infinite}
+  @keyframes authspin{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){.auth-spin{animation-duration:2s}}
   .auth-toggle{color:var(--dim);font-size:var(--t-sm);padding:var(--s2);min-height:var(--tap)}
   .pinbox{background:var(--bg2);border:1px dashed var(--accent);border-radius:var(--r);
     padding:var(--s3);text-align:center}
@@ -1310,7 +1345,7 @@
     <div class="modal-card">
       <h3 style="display:flex;align-items:center;gap:8px">Remote Explorer <button class="go" id="rexClose" style="margin-left:auto;background:var(--bg3);padding:6px 12px">✕</button></h3>
       <p style="font-size:12px;color:var(--dim);margin:0">Ваши серверы. Тап «Подключиться» — терминал и запуск кода пойдут туда.</p>
-      <div id="rexList" style="max-height:52vh;overflow:auto"></div>
+      <div id="rexList" style="max-height:calc(var(--vh,100vh) * 0.52);overflow:auto"></div>
       <button class="go" id="rexAdd">Добавить сервер</button>
     </div>
   </div>
@@ -1343,7 +1378,7 @@
       <div id="dirCur" style="font-family:var(--mono);font-size:12px;color:var(--accent);word-break:break-all;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:9px">—</div>
       <button id="dirNew" style="align-self:flex-start;display:flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border);color:var(--fg);border-radius:9px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v4M10 13h4"/></svg>Новая папка здесь</button>
       <div id="dirRecentWrap" style="display:none"><div style="font-size:11px;color:var(--dim);margin-bottom:5px">Недавние</div><div id="dirRecent"></div></div>
-      <div id="dirList" style="max-height:32vh;overflow:auto;display:flex;flex-direction:column;gap:5px"></div>
+      <div id="dirList" style="max-height:calc(var(--vh,100vh) * 0.32);overflow:auto;display:flex;flex-direction:column;gap:5px"></div>
       <input id="dirManual" placeholder="или впишите путь: /root/prod" autocapitalize="none" autocorrect="off" spellcheck="false">
       <div style="display:flex;gap:8px">
         <button class="go" id="dirPick" style="flex:1">Выбрать эту папку</button>
@@ -1354,10 +1389,10 @@
   </div>
 
   <div class="modal" id="chatsModal">
-    <div class="modal-card" style="max-height:86vh">
+    <div class="modal-card" style="max-height:calc(var(--vh,100vh) * 0.86)">
       <h3 style="font-size:15px">Чаты с сервера · <span id="chatsAgent">Claude</span></h3>
       <p style="font-size:12px;color:var(--dim);margin:0">Все ваши диалоги на сервере. Нажмите, чтобы открыть любой.</p>
-      <div id="chatsList" style="max-height:64vh;overflow:auto;display:flex;flex-direction:column;gap:6px"></div>
+      <div id="chatsList" style="max-height:calc(var(--vh,100vh) * 0.64);overflow:auto;display:flex;flex-direction:column;gap:6px"></div>
       <button class="go" id="chatsClose" style="background:var(--bg3)">Закрыть</button>
     </div>
   </div>
@@ -1470,7 +1505,7 @@
         <input id="searchInp" placeholder="Искать по всему проекту..." autocapitalize="none" style="flex:1">
         <button class="go" id="searchGo" style="width:auto;padding:11px 16px">Найти</button>
       </div>
-      <div id="searchRes" style="max-height:55vh;overflow:auto"></div>
+      <div id="searchRes" style="max-height:calc(var(--vh,100vh) * 0.55);overflow:auto"></div>
       <button class="go" id="searchClose" style="background:var(--bg3)">Закрыть</button>
     </div>
   </div>
@@ -1480,7 +1515,7 @@
     <div class="modal-card">
       <h3>История версий</h3>
       <div id="histFile" style="font-size:12px;color:var(--dim);font-family:var(--mono)"></div>
-      <div id="histList" style="max-height:50vh;overflow:auto;display:flex;flex-direction:column;gap:6px"></div>
+      <div id="histList" style="max-height:calc(var(--vh,100vh) * 0.5);overflow:auto;display:flex;flex-direction:column;gap:6px"></div>
       <button class="go" id="histCancel" style="background:var(--bg3)">Закрыть</button>
     </div>
   </div>
@@ -2586,6 +2621,40 @@ fitViewport();
   ci.addEventListener('blur',()=>{document.body.classList.remove('kbd');setTimeout(fitViewport,50);setTimeout(fitViewport,300);});
 })();
 
+/* Клавиатура и поля ввода — общее поведение для всего приложения.
+   Раньше про клавиатуру знала только строка команд в консоли; в модалках
+   (добавление сервера, приватный ключ, рабочая папка) высота считалась от
+   полного экрана, поле уезжало под клавиатуру, а карточка сжимала его
+   в полоску. Теперь про клавиатуру знает любое поле. */
+(function(){
+  let openers=0;
+  const isField=el=>el&&/^(INPUT|TEXTAREA)$/.test(el.tagName)&&el.type!=='checkbox'&&el.type!=='radio'&&el.type!=='file';
+  document.addEventListener('focusin',e=>{
+    if(!isField(e.target))return;
+    openers++;
+    document.body.classList.add('kbd');
+    // три замера: клавиатура выезжает не мгновенно и не одинаково быстро
+    [60,220,450].forEach(t=>setTimeout(()=>{
+      fitViewport();
+      // подтягиваем поле в видимую область, если оно оказалось под клавиатурой
+      try{
+        const r=e.target.getBoundingClientRect();
+        const vh=(window.visualViewport?window.visualViewport.height:window.innerHeight);
+        if(r.bottom>vh-8||r.top<0)e.target.scrollIntoView({block:'center',behavior:'smooth'});
+      }catch(_){}
+    },t));
+  },true);
+  document.addEventListener('focusout',e=>{
+    if(!isField(e.target))return;
+    openers=Math.max(0,openers-1);
+    setTimeout(()=>{
+      // класс снимаем, только если фокус не ушёл в соседнее поле
+      if(!isField(document.activeElement)){document.body.classList.remove('kbd');}
+      fitViewport();
+    },80);
+  },true);
+})();
+
 /* ═══ ИИ-чаты (Claude + Codex) ═══ */
 const AICFG={
   claude:{box:'chat',inp:'chatInp',send:'chatSend',proj:'aiProjName',label:'Claude',logo:'✳',busy:false},
@@ -3552,6 +3621,8 @@ $('rexAdd').onclick=openAddServer;
 const SVG_TERM='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8l4 4-4 4"/><path d="M12 16h6"/></svg>';
 const SVG_AI='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3.5l1.7 4.6c.2.5.5.8 1 1L19 10.8l-4.3 1.7c-.5.2-.8.5-1 1L12 18.1l-1.7-4.6c-.2-.5-.5-.8-1-1L5 10.8l4.3-1.7c.5-.2.8-.5 1-1z"/><path d="M18 4.5l.7 1.8.8.7-.8.7-.7 1.8-.7-1.8-.8-.7.8-.7z"/></svg>';
 const SVG_DOTS='<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>';
+const SVG_FOLDER='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+const SVG_CHEV='<svg class="shf-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>';
 function renderRex(boxId){
   boxId=boxId||'serversList';
   const box=$(boxId); if(!box)return; box.innerHTML='';
@@ -3564,12 +3635,26 @@ function renderRex(boxId){
       '<div class="sh-addr"></div>'+
       '<div class="sh-badge">…</div>'+
       '<div class="sh-div"></div>'+
+      // Рабочая папка — свойство сервера, и место ей здесь. Раньше её можно
+      // было задать только через неприметную кнопку «папка» в консоли или
+      // через колонку статистики с подписью «Активный проект» — то есть
+      // человек с подключённым сервером просто не находил, где её открыть.
+      '<button class="sh-folder" data-a="dir">'+SVG_FOLDER+
+        '<span class="shf-txt"><span class="shf-l">Рабочая папка</span>'+
+        '<span class="shf-v"></span></span>'+SVG_CHEV+'</button>'+
       '<div class="sh-actions">'+
         '<button class="sh-act" data-a="term">'+SVG_TERM+'<span>Открыть консоль</span></button>'+
         '<button class="sh-act" data-a="ai">'+SVG_AI+'<span>ИИ-помощник</span></button>'+
       '</div>';
     el.querySelector('.sh-name').textContent=s.name;
     el.querySelector('.sh-addr').textContent=s.user+'@'+s.host+':'+s.port;
+    const fv=el.querySelector('.shf-v');
+    fv.textContent=s.workdir||'не выбрана — работаем с проектами';
+    fv.classList.toggle('unset',!s.workdir);
+    el.querySelector('[data-a="dir"]').onclick=()=>{
+      switchTarget(s.id);
+      if(typeof openDirPicker==='function')openDirPicker();
+    };
     const badge=el.querySelector('.sh-badge');
     if(active){badge.textContent='Подключён';badge.classList.add('on');el.querySelector('.dot').classList.add('on');}
     else{badge.textContent='проверка…';}
@@ -3586,7 +3671,7 @@ function renderHomeStats(){
   const el=$('homeStats'); if(!el)return;
   const now=new Date();const t=now.toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit'});
   const _fold=(typeof rfsSrv==='function')?rfsSrv():null;
-  const _ctxL=_fold?'Рабочая папка':'Активный проект';
+  const _ctxL=_fold?'Рабочая папка':'Активный проект';   // подпись зависит от режима
   const _ctxV=_fold?(_fold.workdir.split('/').filter(Boolean).pop()||'/'):(PROJECT||'—');
   el.innerHTML='<div class="st-col" id="stFolder" style="cursor:pointer"><div class="st-l">'+_ctxL+' ›</div><div class="st-v">'+_ctxV+'</div></div>'+
     '<div class="st-sep"></div><div class="st-col" id="stServers" style="cursor:pointer"><div class="st-l">Серверов ›</div><div class="st-v">'+SERVERS.length+'</div></div>';
@@ -3876,9 +3961,23 @@ function updateAiHeader(){
   if(tg){ try{ tg.ready(); tg.expand(); if(tg.setHeaderColor)tg.setHeaderColor('#0a0c10'); if(tg.setBackgroundColor)tg.setBackgroundColor('#0a0c10'); }catch(e){} }
   const inTg = tg && tg.initData && tg.initData.length>10;
   if(inTg){
+    // В Telegram форму регистрации не показываем вообще, пока вход не отказал:
+    // экран входа виден по умолчанию, и на время запроса человек успевал
+    // прочитать «введите инвайт-код» — хотя код ему не нужен и не будет нужен.
+    const auth=$('auth'), form=$('authForm');
+    if(form)form.classList.add('hidden');
+    if(auth){
+      const w=document.createElement('div');
+      w.className='auth-wait';w.id='authWait';
+      w.innerHTML='<div class="auth-spin"></div><div>Входим через Telegram…</div>';
+      auth.appendChild(w);
+    }
+    const dropWait=()=>{const w=$('authWait');if(w)w.remove();if(form)form.classList.remove('hidden');};
     api('api/tg-login',{method:'POST',body:JSON.stringify({initData:tg.initData})})
-      .then(()=>boot())
+      .then(()=>{dropWait();boot();})
       .catch(err=>{
+        // вход не прошёл — только теперь показываем форму и объясняем причину
+        dropWait();
         try{
           const u=tg.initDataUnsafe&&tg.initDataUnsafe.user;
           $('aErr').textContent=((err&&err.message)?err.message:'Не удалось войти через Telegram')+(u&&u.id?(' · ваш Telegram ID: '+u.id):'');

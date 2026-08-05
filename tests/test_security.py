@@ -154,6 +154,55 @@ class TrustedProxy(unittest.TestCase):
             self.assertFalse(server._is_trusted_proxy(ip), ip)
 
 
+class OriginCheck(unittest.TestCase):
+    """Отсекаем только конкретный чужой источник. Пустой и `null` проходят —
+    иначе ломается вход из Telegram Mini App, который живёт в песочнице."""
+
+    def _h(self, origin, host="code.example.com", https=True):
+        """Handler без сокета: подставляем только заголовки."""
+        h = server.Handler.__new__(server.Handler)
+        hdrs = {"Host": host}
+        if https:
+            hdrs["X-Forwarded-Proto"] = "https"
+        if origin is not None:
+            hdrs["Origin"] = origin
+        h.headers = hdrs
+        return h
+
+    def test_same_origin_passes(self):
+        # порт по умолчанию подразумевается схемой: с :443 и без — одно и то же
+        for o in ("https://code.example.com", "https://code.example.com:443"):
+            self.assertTrue(server.Handler._origin_ok(self._h(o)), o)
+        # на http-странице так же работает 80-й
+        self.assertTrue(server.Handler._origin_ok(
+            self._h("http://code.example.com", https=False)))
+
+    def test_plain_http_origin_on_https_page_is_rejected(self):
+        # схема — часть источника: http://site и https://site разные
+        self.assertFalse(server.Handler._origin_ok(
+            self._h("http://code.example.com", https=True)))
+
+    def test_absent_and_null_pass(self):
+        # не-браузерный клиент и Telegram Mini App в песочнице
+        self.assertTrue(server.Handler._origin_ok(self._h(None)))
+        self.assertTrue(server.Handler._origin_ok(self._h("null")))
+        self.assertTrue(server.Handler._origin_ok(self._h("")))
+
+    def test_telegram_origins_pass(self):
+        for o in ("https://web.telegram.org", "https://k.web.telegram.org",
+                  "https://telegram.org"):
+            self.assertTrue(server.Handler._origin_ok(self._h(o)), o)
+
+    def test_foreign_origin_is_rejected(self):
+        for o in ("https://evil.example", "http://code.example.com.evil.net",
+                  "https://telegram.org.evil.net", "https://nottelegram.org"):
+            self.assertFalse(server.Handler._origin_ok(self._h(o)), o)
+
+    def test_other_port_is_rejected(self):
+        self.assertFalse(server.Handler._origin_ok(
+            self._h("https://code.example.com:8443", host="code.example.com:443")))
+
+
 class PrivateFiles(unittest.TestCase):
     """Файлы с секретами создаются сразу с правами 0600."""
 

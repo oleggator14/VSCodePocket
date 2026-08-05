@@ -371,15 +371,67 @@ def geo_lookup(ip):
     return data
 
 
-def new_session(db, username, ip="", ua=""):
-    token = secrets.token_urlsafe(32)
+MAX_SESSIONS_PER_USER = 10   # больше — это уже мусор, а не устройства
+
+
+def prune_sessions(db, username):
+    """Оставляет пользователю только свежие сессии.
+
+    Каждый вход заводил новую запись, а Telegram Mini App логинится при каждом
+    открытии — у активных пользователей накапливались десятки «устройств»
+    (одному досталось 62), и список входов переставал что-либо значить."""
+    mine = [(t, s) for t, s in db["sessions"].items()
+            if s.get("user") == username]
+    mine.sort(key=lambda x: -(x[1].get("seen") or x[1].get("ts") or 0))
+    for t, _ in mine[MAX_SESSIONS_PER_USER:]:
+        db["sessions"].pop(t, None)
+
+
+def find_session(db, username, ua, ip):
+    """Токен живой сессии этого же пользователя с того же устройства.
+
+    Нужен, чтобы повторный вход с уже знакомого устройства продлевал текущую
+    сессию, а не плодил новую запись рядом."""
     now = int(time.time())
+    dev = parse_device(ua)
+    best, best_seen = None, -1
+    for t, s in db["sessions"].items():
+        if s.get("user") != username or s.get("device") != dev:
+            continue
+        if now - (s.get("ts") or 0) > SESSION_TTL:
+            continue
+        seen = s.get("seen") or s.get("ts") or 0
+        if seen > best_seen:
+            best, best_seen = t, seen
+    return best
+
+
+def new_session(db, username, ip="", ua="", reuse=True, current=None):
+    now = int(time.time())
+    # Точный случай: браузер уже прислал живую cookie этого же пользователя
+    # (Telegram логинится при каждом открытии) — продлеваем ровно её.
+    if current:
+        s = db["sessions"].get(current)
+        if s and s.get("user") == username and now - (s.get("ts") or 0) <= SESSION_TTL:
+            s["seen"] = now
+            s["ip"] = ip or s.get("ip", "")
+            return current
+    # иначе — то же устройство того же человека, чтобы не плодить записи
+    if reuse:
+        tok = find_session(db, username, ua, ip)
+        if tok:
+            s = db["sessions"][tok]
+            s["seen"] = now
+            s["ip"] = ip or s.get("ip", "")
+            return tok
+    token = secrets.token_urlsafe(32)
     db["sessions"][token] = {"user": username, "ts": now, "seen": now,
                              "ip": ip, "ua": ua, "device": parse_device(ua)}
     # подчистим протухшие
     for t in list(db["sessions"]):
         if now - db["sessions"][t]["ts"] > SESSION_TTL:
             del db["sessions"][t]
+    prune_sessions(db, username)
     # история входов в записи пользователя (последние 20)
     u = db["users"].get(username)
     if u is not None:
@@ -399,13 +451,21 @@ def session_user(handler):
             token = v
     if not token:
         return None
+    now = int(time.time())
     with _lock:
         db = db_load()
         sess = db["sessions"].get(token)
         if not sess:
             return None
-        if int(time.time()) - sess["ts"] > SESSION_TTL:
+        if now - sess["ts"] > SESSION_TTL:
             return None
+        # Отмечаем, что сессией пользуются. Поле seen раньше ставилось один раз
+        # при создании и больше не двигалось — «последняя активность» в списке
+        # входов показывала дату регистрации устройства, а не последний заход.
+        # Пишем не чаще раза в 5 минут, чтобы не дёргать базу на каждый запрос.
+        if now - (sess.get("seen") or 0) > 300:
+            sess["seen"] = now
+            db_save(db)
         return sess["user"]
 
 
@@ -3862,22 +3922,38 @@ class Handler(BaseHTTPRequestHandler):
     def _origin_ok(self):
         """Пришёл ли запрос с нашей же страницы.
 
-        Cookie сессии помечена SameSite=Lax, но полагаться только на неё для
-        WebSocket-терминала нельзя: цена ошибки — живой shell. Сверяем Origin
-        с Host. Заголовка нет (не-браузерный клиент, curl) — пропускаем:
-        подделать Origin из чужой вкладки браузер всё равно не даёт."""
-        origin = self.headers.get("Origin")
-        if not origin:
+        Отклоняем только КОНКРЕТНЫЙ чужой источник. Отсутствующий или
+        непрозрачный (`null`) Origin пропускаем: так ведут себя не-браузерные
+        клиенты и встроенный Telegram Mini App — он живёт в песочнице iframe,
+        и браузер шлёт оттуда `Origin: null`. Первая версия этой проверки
+        отбивала такие запросы, и вход через Telegram переставал работать:
+        человек видел форму с инвайт-кодом вместо своего аккаунта.
+
+        Защиту это не ослабляет: чужая вкладка всегда присылает свой реальный
+        источник, а от встраивания нас закрывает CSP frame-ancestors, куда
+        Telegram внесён явно. Плюс cookie сессии помечена SameSite=Lax."""
+        origin = (self.headers.get("Origin") or "").strip()
+        if not origin or origin.lower() == "null":
             return True
-        host = (self.headers.get("Host") or "").lower()
         try:
             o = urlparse(origin)
         except ValueError:
             return False
         if not o.hostname:
             return False
-        netloc = o.hostname + (":%d" % o.port if o.port else "")
-        return netloc.lower() == host or o.hostname.lower() == host.split(":")[0]
+        # Сравниваем имя И порт. Порт по умолчанию подразумевается схемой:
+        # https://site и https://site:443 — один источник, а https://site:8443
+        # уже другой, и раньше он проходил, потому что сверялось только имя.
+        host = (self.headers.get("Host") or "").lower()
+        hname, _, hport = host.partition(":")
+        page_https = self._is_https()
+        oport = o.port or (443 if o.scheme == "https" else 80)
+        hport = int(hport) if hport.isdigit() else (443 if page_https else 80)
+        if o.hostname.lower() == hname and oport == hport:
+            return True
+        # Telegram открывает мини-апп со своих доменов
+        h = o.hostname.lower()
+        return h == "telegram.org" or h.endswith(".telegram.org")
 
     def _cookie_token(self):
         for part in (self.headers.get("Cookie", "")).split(";"):
@@ -3947,7 +4023,8 @@ class Handler(BaseHTTPRequestHandler):
             salt = secrets.token_hex(8)
             db["users"][username] = {"salt": salt, "pin": hash_pin(pin, salt),
                                      "role": role, "created": int(time.time())}
-            token = new_session(db, username, ip, self.headers.get("User-Agent", ""))
+            token = new_session(db, username, ip, self.headers.get("User-Agent", ""),
+                                current=self._cookie_token())
             db_save(db)
         audit("register", user=username, role=role, ip=ip)
         return self._json({"ok": True, "user": username, "pin": pin, "role": role},
@@ -3984,7 +4061,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 u["fails"] = 0
                 u.pop("locked_until", None)
-                token = new_session(db, username, ip, self.headers.get("User-Agent", ""))
+                token = new_session(db, username, ip, self.headers.get("User-Agent", ""),
+                                current=self._cookie_token())
                 db_save(db)
         # задержку от перебора держим ВНЕ глобального замка,
         # иначе поток неудачных входов подвешивает весь сервер
@@ -4051,7 +4129,8 @@ class Handler(BaseHTTPRequestHandler):
                     "tg_name": (tg_user.get("username")
                                 or tg_user.get("first_name") or "")[:40]}
                 audit("tg_register", user=username, tg_id=tg_id, role=role, ip=ip)
-            token = new_session(db, username, ip, self.headers.get("User-Agent", ""))
+            token = new_session(db, username, ip, self.headers.get("User-Agent", ""),
+                                current=self._cookie_token())
             db_save(db)
         audit("tg_login", user=username, tg_id=tg_id, ip=ip)
         return self._json({"ok": True, "user": username},
