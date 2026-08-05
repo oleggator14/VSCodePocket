@@ -585,13 +585,14 @@
   .noserv b{color:#fff;font-size:var(--t-lg)}
   .noserv button{min-height:var(--tap);padding:0 var(--s5);border-radius:var(--r);
     background:var(--accent);color:var(--on-accent);font-size:var(--t-md);font-weight:600}
-  .quickrow{display:flex;gap:var(--s2);padding:var(--s2) var(--s3) 0;background:var(--bg2)}
+  /* нижний отступ был нулевой — кнопки упирались в коробку ввода */
+  .quickrow{display:flex;gap:var(--s2);padding:var(--s3) var(--s3);background:var(--bg2)}
   .quickrow button{flex:1;min-height:var(--tap);border-radius:var(--r-sm);
     background:var(--bg3);border:1px solid var(--border);color:var(--fg);
     font-size:var(--t-md);font-weight:600}
   .quickrow button:active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-  .cmdbar{display:flex;gap:var(--s2);padding:var(--s2) var(--s3);background:var(--bg2);
-    border-top:1px solid var(--border);flex-shrink:0}
+  .cmdbar{display:flex;gap:var(--s2);padding:0 var(--s3) var(--s3);background:var(--bg2);
+    flex-shrink:0}
   .cmdbar input{flex:1;min-height:var(--tap);font-family:var(--mono);border-radius:var(--r)}
   .cmdbar button{flex:0 0 auto;min-width:52px;border-radius:var(--r);
     background:var(--accent);color:var(--on-accent);font-size:var(--t-xl);font-weight:700}
@@ -602,8 +603,13 @@
   #s-term .keysrow{background:var(--bg);
     padding-bottom:calc(var(--s2) + env(safe-area-inset-bottom))}
   #s-term .keysrow .key{min-width:50px;height:46px}
+  /* Безопасную зону снизу добавляет ТОЛЬКО таббар — он лежит ниже всех.
+     Раньше её добавляла и панель клавиш, и получалась пустая полоса
+     в палец высотой между последним рядом кнопок и нижним меню. */
   .keypanel{background:var(--bg2);border-top:1px solid var(--border);
-    padding:var(--s2) var(--s2) calc(var(--s2) + env(safe-area-inset-bottom));flex-shrink:0}
+    padding:var(--s2);flex-shrink:0}
+  /* когда таббара нет (набор команды) — зону добавляет панель */
+  body.kbd .keypanel{padding-bottom:calc(var(--s2) + env(safe-area-inset-bottom))}
 
   /* ── Набор команды: клавиатура телефона занимает низ экрана ──────────────
      Пока она открыта, наша панель клавиш и ряд быстрых действий прячутся —
@@ -706,6 +712,20 @@
   .pill-btn:active{background:var(--accent-soft);border-color:var(--accent-line)}
   /* совсем узкий экран — подписи прячем, остаются иконки */
   @media (max-width:360px){ .pill-btn span{display:none} .pill-btn{padding:0 10px} }
+  /* Лента и кнопка «вниз» лежат в одном слое: кнопка висит над лентой,
+     не отнимая у неё места, и появляется, только когда есть куда листать. */
+  .chat-area{flex:1;min-height:0;position:relative;display:flex}
+  .tobottom{position:absolute;right:var(--s4);bottom:var(--s3);
+    width:42px;height:42px;border-radius:var(--r-pill);
+    background:var(--bg3);color:var(--fg);border:1px solid var(--border);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:var(--sh-2);z-index:4;
+    opacity:0;visibility:hidden;transform:translateY(6px);
+    transition:opacity .18s var(--ease),transform .18s var(--ease),visibility .18s}
+  .tobottom.on{opacity:1;visibility:visible;transform:none}
+  .tobottom svg{width:20px;height:20px}
+  .tobottom:active{background:var(--accent);color:var(--on-accent);
+    border-color:var(--accent)}
   .chat{flex:1;overflow:auto;overscroll-behavior:contain;padding:var(--s4) var(--s4) var(--s3);
     display:flex;flex-direction:column;gap:var(--s3)}
   /* абзац агента дышит свободнее соседних шагов — так лента не «слипается» */
@@ -783,7 +803,8 @@
   /* Ряд быстрых команд прокручивается вбок. Последний чипс обрезался ровно
      по краю экрана и выглядел сломанным, а не «есть ещё». Маска гасит правый
      край — обрыв читается как продолжение, и подсказывает, что можно тянуть. */
-  .quick{display:flex;gap:var(--s2);overflow-x:auto;padding:var(--s2) var(--s4) 0;
+  .quick{display:flex;gap:var(--s2);overflow-x:auto;
+    padding:var(--s2) var(--s4) var(--s3);
     flex-shrink:0;scroll-padding-inline:var(--s4);
     -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent);
     mask-image:linear-gradient(to right,#000 calc(100% - 28px),transparent)}
@@ -801,8 +822,10 @@
   .attchip .attx{width:28px;height:28px;border-radius:6px;color:var(--dim);
     font-size:var(--t-sm);flex-shrink:0}
   .attchip .attx:active{background:var(--bg2);color:var(--red)}
+  /* Одна левая граница у ленты, чипсов и поля ввода: было 16 / 16 / 12,
+     и коробка ввода заметно съезжала влево относительно всего остального. */
   .chat-inp{display:flex;gap:var(--s2);align-items:flex-end;
-    padding:var(--s3) var(--s3) calc(var(--s3) + env(safe-area-inset-bottom));
+    padding:var(--s2) var(--s4) calc(var(--s3) + env(safe-area-inset-bottom));
     border-top:1px solid var(--border);background:var(--bg)}
   .chat-inp textarea{flex:1;min-height:var(--tap);max-height:120px;
     border-radius:var(--r);resize:none;line-height:1.4}
@@ -1209,7 +1232,7 @@
     </div>
     <!-- Claude -->
     <div class="aipanel on" id="panel-claude">
-      <div class="chat" id="chat"></div>
+      <div class="chat-area"><div class="chat" id="chat"></div><button class="tobottom" id="toBottom" title="К последним сообщениям"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v13"/><path d="M6 13l6 6 6-6"/></svg></button></div>
       <div class="quick">
         <div class="qchip" data-q="Расскажи, что в этом проекте и что можно улучшить">Изучи проект</div>
         <div class="qchip" data-q="Найди и исправь ошибки, потом запусти и проверь">Найди баги</div>
@@ -1226,7 +1249,7 @@
     </div>
     <!-- Codex -->
     <div class="aipanel" id="panel-codex">
-      <div class="chat" id="chatCx"></div>
+      <div class="chat-area"><div class="chat" id="chatCx"></div><button class="tobottom" id="toBottomCx" title="К последним сообщениям"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v13"/><path d="M6 13l6 6 6-6"/></svg></button></div>
       <div class="quick">
         <div class="qchip" data-agent="codex" data-q="Расскажи, что в этом проекте и что можно улучшить">Изучи проект</div>
         <div class="qchip" data-agent="codex" data-q="Найди и исправь ошибки, потом запусти и проверь">Найди баги</div>
@@ -1804,6 +1827,15 @@ function switchProject(name){   // сменить проект, не меняя 
   refreshAiEmpty();
 }
 function selectProject(name){   // выбрать проект и перейти к файлам
+  // Источников файлов два: проекты на нашей машине и рабочая папка на сервере.
+  // Если задана папка сервера, дерево показывало ЕЁ — то есть человек нажимал
+  // на свой проект, а открывался сервер, и понять почему было невозможно.
+  // Выбор проекта теперь честно переключает режим и говорит об этом.
+  const folder=(typeof rfsSrv==='function')?rfsSrv():null;
+  if(folder){
+    if(typeof setWorkdir==='function')setWorkdir('');
+    hint('Файлы теперь из проекта «'+name+'». Папку сервера вернёте кнопкой «папка» в консоли');
+  }
   switchProject(name);
   go('files');
   $('menuBtn').click();
@@ -2720,6 +2752,14 @@ function applyViewport(){
   // прижимаем body ровно к видимой области (учитывая сдвиг под клавиатурой)
   document.body.style.top=top+'px';
   if(window.scrollY||window.scrollX)window.scrollTo(0,0);
+  // Признак «клавиатура на экране» берём из РЕАЛЬНОЙ высоты, а не из фокуса.
+  // Фокус приходит мгновенно, а клавиатура уезжает ещё треть секунды: класс
+  // снимался раньше времени, панель клавиш возвращалась в ещё сжатый экран и
+  // налезала на нижнее меню — то самое, что видно на скриншоте закрытия.
+  if(vv){
+    const open = (window.innerHeight - h) > 120;
+    document.body.classList.toggle('kbd', open);
+  }
 }
 function settleViewport(){
   _vpSettle=0;
@@ -2753,7 +2793,9 @@ applyViewport(); settleViewport();
   let scrollTimer=0;
   document.addEventListener('focusin',e=>{
     if(!isField(e.target))return;
-    document.body.classList.add('kbd');
+    // класс ставит applyViewport по реальной высоте; здесь только на случай
+    // браузеров без visualViewport
+    if(!window.visualViewport)document.body.classList.add('kbd');
     // Раскладку не трогаем руками: visualViewport сам шлёт события всю
     // анимацию, а fitViewport сведёт их в один кадр. Раньше здесь стояли три
     // таймера на 60/220/450 мс — они дёргали пересчёт поверх этих событий и
@@ -2771,11 +2813,32 @@ applyViewport(); settleViewport();
   document.addEventListener('focusout',e=>{
     if(!isField(e.target))return;
     clearTimeout(scrollTimer);
-    setTimeout(()=>{
+    if(!window.visualViewport)setTimeout(()=>{
       // класс снимаем, только если фокус не ушёл в соседнее поле
       if(!isField(document.activeElement))document.body.classList.remove('kbd');
     },80);
   },true);
+})();
+
+/* Кнопка «к последним сообщениям». В длинной переписке промотать вниз
+   пальцем — отдельная работа, особенно после ответа агента на пол-экрана. */
+(function(){
+  const pairs=[['chat','toBottom'],['chatCx','toBottomCx']];
+  const near=b=>b.scrollHeight-b.scrollTop-b.clientHeight<120;
+  pairs.forEach(([boxId,btnId])=>{
+    const box=$(boxId), btn=$(btnId);
+    if(!box||!btn)return;
+    const sync=()=>btn.classList.toggle('on',!near(box));
+    box.addEventListener('scroll',sync,{passive:true});
+    btn.addEventListener('click',()=>{
+      box.scrollTo({top:box.scrollHeight,behavior:'smooth'});
+      btn.classList.remove('on');
+    });
+    // лента растёт по мере ответа агента — следим и за этим
+    if(window.MutationObserver)
+      new MutationObserver(sync).observe(box,{childList:true,subtree:true});
+    sync();
+  });
 })();
 
 /* ═══ ИИ-чаты (Claude + Codex) ═══ */

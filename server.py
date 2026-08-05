@@ -1182,16 +1182,25 @@ def spawn_ssh(username, server):
     # держим сессию в tmux на СЕРВЕРЕ ПОЛЬЗОВАТЕЛЯ — тогда при перезагрузке
     # страницы (обрыв ssh) Claude/Codex/процессы продолжают жить, а мы
     # переподключаемся к той же сессии. Если tmux нет — обычный shell.
+    # Полоса состояния tmux («[cpkt] 0:bash* "хост" 12:47 05-Aug-26») съедает
+    # на телефоне целую строку из полутора десятков и ничего не сообщает: имя
+    # сессии и хост человек и так видит в шапке приложения. Гасим её и заодно
+    # включаем мышь — тогда прокрутка вывода работает жестом, а не только
+    # клавишами. Настройки задаются для нашей сессии, чужие tmux не трогаем.
+    tmux_opts = ("set -g status off \\; "
+                 "set -g mouse on \\; "
+                 "set -g history-limit 20000")
     wd = server.get("workdir") or ""
     if wd:
         wq = shlex.quote(wd)
         remote_cmd = ('command -v tmux >/dev/null 2>&1 && '
-                      'exec tmux new-session -A -s cpkt -c %s || '
-                      '{ cd %s 2>/dev/null; exec "${SHELL:-/bin/bash}" -l; }' % (wq, wq))
+                      'exec tmux new-session -A -s cpkt -c %s \\; %s || '
+                      '{ cd %s 2>/dev/null; exec "${SHELL:-/bin/bash}" -l; }'
+                      % (wq, tmux_opts, wq))
     else:
         remote_cmd = ('command -v tmux >/dev/null 2>&1 && '
-                      'exec tmux new-session -A -s cpkt || '
-                      'exec "${SHELL:-/bin/bash}" -l')
+                      'exec tmux new-session -A -s cpkt \\; %s || '
+                      'exec "${SHELL:-/bin/bash}" -l' % tmux_opts)
 
     if auth == "key":
         # временный файл ключа в домашней папке пользователя, 0600
