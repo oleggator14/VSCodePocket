@@ -35,16 +35,20 @@
     --card:#12161f;
     --border:#232a38; --border-2:#333c4e;
     --term-bg:#101114;
-    /* текст */
-    --fg:#eef1f7; --dim:#9aa4b6; --dim-2:#6d788c;
-    /* акцент и семантика */
-    --accent:#3b7bff; --accent-soft:rgba(59,123,255,.15);
-    --accent-line:rgba(59,123,255,.45); --on-accent:#fff;
-    --blue:#3b7bff; --green:#2ec76a; --red:#ff5a5a; --yellow:#e0b34a;
+    /* текст. --dim-2 раньше был #6d788c и не набирал 4.5:1 ни на одной
+       поверхности — на телефоне под солнцем это просто не читалось */
+    --fg:#eef1f7; --dim:#9aa4b6; --dim-2:#8590a5;
+    /* Акцент — зелёный «код пошёл»: то же действие, что кнопка «Запустить».
+       Был дежурный #3b7bff, который не проходил по контрасту на --bg3 (3.89)
+       и ничего не значил. Синий остался, но только для информационного. */
+    --accent:#3ddc84; --accent-soft:rgba(61,220,132,.14);
+    --accent-line:rgba(61,220,132,.42); --on-accent:#04140b;
+    --blue:#5b8cff; --green:#3ddc84; --red:#ff5a5a; --yellow:#e0b34a;
     --purple:#8b7be8;
-    --green-soft:rgba(46,199,106,.15); --red-soft:rgba(255,90,90,.13);
-    /* типографика — 6 ступеней, больше не изобретаем */
-    --t-xs:11.5px; --t-sm:13px; --t-md:14.5px; --t-lg:16px; --t-xl:20px; --t-2xl:26px;
+    --green-soft:rgba(61,220,132,.14); --red-soft:rgba(255,90,90,.13);
+    /* типографика — 6 ступеней. Шаги между ступенями увеличены: раньше
+       13/14.5/16 читались как один размер, и иерархии не было видно */
+    --t-xs:12px; --t-sm:13.5px; --t-md:15.5px; --t-lg:17.5px; --t-xl:22px; --t-2xl:30px;
     --font:-apple-system,'SF Pro Text',system-ui,'Segoe UI',Roboto,sans-serif;
     --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
     /* радиусы — 4 ступени + «таблетка» */
@@ -54,7 +58,10 @@
     /* тени, тач-цель, кривая движения */
     --sh-1:0 1px 2px rgba(0,0,0,.35);
     --sh-2:0 14px 34px -18px rgba(0,0,0,.85);
-    --sh-accent:0 12px 30px -16px rgba(59,123,255,.85);
+    /* Подъём кнопки — нейтральный, со смещением. Раньше здесь висел цветной
+       ореол под акцент: это не глубина, а свечение, дежурный приём тёмных
+       AI-интерфейсов. Настоящая тень падает вниз и не красится. */
+    --sh-accent:0 6px 16px -8px rgba(0,0,0,.7);
     --tap:44px; --ease:cubic-bezier(.2,.8,.2,1);
   }
   /* Светлая тема переопределяет ВСЕ токены. Раньше их было семь, а половина
@@ -64,11 +71,13 @@
     --bg:#f5f6f9; --bg1:#eceef3; --bg2:#ffffff; --bg3:#e8ebf1;
     --card:#ffffff;
     --border:#dde1e9; --border-2:#c4cbd8;
-    --fg:#141821; --dim:#5b6474; --dim-2:#828b9b;
-    --accent:#2461f0; --accent-soft:rgba(36,97,240,.10);
-    --accent-line:rgba(36,97,240,.35);
-    --blue:#2461f0; --green:#12a150; --red:#dc3b40; --yellow:#a67505;
-    --green-soft:rgba(18,161,80,.12); --red-soft:rgba(220,59,64,.10);
+    --fg:#141821; --dim:#5b6474; --dim-2:#6b7484;
+    /* На светлом тот же зелёный «Run», но затемнённый: #3ddc84 под белым
+       текстом даёт 1.6:1. #0b7a3c держит 5.4:1 на кнопке и 5.0:1 как текст. */
+    --accent:#0b7a3c; --accent-soft:rgba(11,122,60,.10);
+    --accent-line:rgba(11,122,60,.35); --on-accent:#ffffff;
+    --blue:#2461f0; --green:#0b7a3c; --red:#dc3b40; --yellow:#a67505;
+    --green-soft:rgba(11,122,60,.12); --red-soft:rgba(220,59,64,.10);
     --sh-1:0 1px 2px rgba(16,24,40,.06);
     --sh-2:0 14px 34px -20px rgba(16,24,40,.26);
     --sh-accent:0 12px 28px -16px rgba(36,97,240,.5);
@@ -93,13 +102,24 @@
   input[type=number],input[type=search],input:not([type]){
     -webkit-appearance:none;appearance:none}
   button{cursor:pointer;color:inherit;background:none;border:none}
-  a{color:var(--blue)}
+  a{color:var(--blue);text-underline-offset:.18em;text-decoration-thickness:1px}
   :focus{outline:none}
   :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .hidden{display:none!important}
+  /* Поверхности, которые рисует браузер, а не мы. По умолчанию они приезжают
+     с системными цветами и выдают, что интерфейс собрали, а не сделали:
+     синее выделение поверх зелёного акцента, чёрная каретка, чужие галочки. */
+  ::selection{background:var(--accent-soft);color:var(--fg)}
+  input,textarea{caret-color:var(--accent)}
+  input[type=checkbox],input[type=radio],progress{accent-color:var(--accent)}
+  ::placeholder{color:var(--dim-2);opacity:1}
+  /* цифры в данных не должны плясать по ширине при обновлении */
+  .stat-v,.pin,.meterrow,.statcard,.qnum,time{font-variant-numeric:tabular-nums}
   ::-webkit-scrollbar{width:6px;height:6px}
   ::-webkit-scrollbar-thumb{background:var(--border-2);border-radius:3px}
+  ::-webkit-scrollbar-thumb:hover{background:var(--dim-2)}
   ::-webkit-scrollbar-track{background:transparent}
+  *{scrollbar-color:var(--border-2) transparent}
   /* горизонтальные ряды кнопок скроллятся без видимой полосы */
   .tabs,.findbar,.edkeys,.statusbar,.srvbar,.keysrow,.cmdrow,.quick,
   .kp-tabs,.attrow{scrollbar-width:none}
@@ -285,6 +305,27 @@
   .empty{position:absolute;inset:0;display:flex;flex-direction:column;gap:var(--s2);
     align-items:center;justify-content:center;color:var(--dim);font-size:var(--t-sm);
     text-align:center;padding:var(--s5)}
+  /* Первый экран. Был список из трёх пронумерованных карточек плюс легенда
+     из пяти вкладок с эмодзи вместо иконок — то есть лекция обо всём сразу,
+     ещё до того как человек что-то сделал. Теперь одна мысль и одно действие:
+     подключить сервер. Что делает каждая вкладка, объясняют пустые состояния
+     самих вкладок — там, где вопрос реально возникает. */
+  .ht-hero{padding:var(--s2) 0 var(--s1)}
+  .ht-title{font-size:var(--t-2xl);font-weight:800;line-height:1.12;
+    letter-spacing:-.03em;color:var(--fg);text-wrap:balance}
+  .ht-lede{font-size:var(--t-md);color:var(--dim);line-height:1.5;
+    margin:var(--s3) 0 0;max-width:34ch}
+  .ht-next{padding:var(--s4);border-radius:var(--r);background:var(--bg2);
+    border:1px solid var(--border)}
+  .ht-next-l{font-size:var(--t-xs);text-transform:uppercase;letter-spacing:.07em;
+    font-weight:700;color:var(--accent)}
+  .ht-next-t{font-size:var(--t-lg);font-weight:700;color:var(--fg);
+    margin-top:var(--s2);letter-spacing:-.015em}
+  .ht-next-d{font-size:var(--t-sm);color:var(--dim);line-height:1.5;
+    margin-top:var(--s2)}
+  .ht-skip{background:none;border:none;color:var(--dim);font-size:var(--t-sm);
+    min-height:var(--tap);cursor:pointer;font-weight:600}
+  .ht-skip:active{color:var(--fg)}
   .ht-steps{display:flex;flex-direction:column;gap:var(--s2)}
   .ht-step{display:flex;gap:var(--s3);align-items:flex-start;padding:var(--s3);
     border-radius:var(--r)}
@@ -549,10 +590,29 @@
   /* ── 6. Экран «ИИ»: чат ─────────────────────────────────────────────── */
   .aipanel{flex:1;display:none;flex-direction:column;min-height:0}
   .aipanel.on{display:flex}
+  /* Строка проекта. Раньше здесь было четыре элемента в один нерушимый ряд,
+     причём ОБЕ кнопки несли margin-left:auto, а select — max-width:52%.
+     На узком экране они наезжали друг на друга. Теперь ряд переносится,
+     select ужимается (min-width:0 — без него flex-элемент не сжимается
+     меньше своего содержимого), кнопки держатся парой. */
   .projpill{margin:0 var(--s4);padding:var(--s2) var(--s3);border-radius:var(--r);
     background:var(--bg2);border:1px solid var(--border);font-size:var(--t-sm);
-    color:var(--dim);display:flex;gap:var(--s2);align-items:center}
+    color:var(--dim);display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap}
   .projpill b{color:var(--fg)}
+  .projpill-l{flex:0 0 auto;color:var(--dim-2);font-size:var(--t-xs);
+    text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+  .projpill-sel{flex:1 1 120px;min-width:0;background:var(--bg3);color:var(--fg);
+    border:1px solid var(--border);border-radius:var(--r-sm);
+    padding:7px 9px;font-size:var(--t-sm);min-height:38px}
+  .projpill-acts{flex:0 0 auto;margin-left:auto;display:flex;gap:var(--s2)}
+  .pill-btn{background:var(--bg3);border:1px solid var(--border);color:var(--fg);
+    border-radius:var(--r-sm);padding:0 var(--s3);min-height:38px;
+    font-size:var(--t-sm);font-weight:600;cursor:pointer;
+    display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .pill-btn svg{width:15px;height:15px;flex:0 0 auto}
+  .pill-btn:active{background:var(--accent-soft);border-color:var(--accent-line)}
+  /* совсем узкий экран — подписи прячем, остаются иконки */
+  @media (max-width:360px){ .pill-btn span{display:none} .pill-btn{padding:0 10px} }
   .chat{flex:1;overflow:auto;padding:var(--s4) var(--s4) var(--s3);
     display:flex;flex-direction:column;gap:var(--s3)}
   /* абзац агента дышит свободнее соседних шагов — так лента не «слипается» */
@@ -674,10 +734,14 @@
     font-size:var(--t-xl);font-weight:700;background-size:cover;background-position:center}
   .meter-t{display:flex;justify-content:space-between;font-size:var(--t-sm);
     color:var(--dim);margin-bottom:var(--s2)}
+  /* Шкала квоты. Анимируем transform, а не width: анимация ширины гоняет
+     раскладку каждый кадр. Заливка растянута на всю дорожку и сжимается
+     от левого края — визуально то же самое, но на композиторе. */
   .meter{height:8px;border-radius:4px;background:var(--bg3);overflow:hidden}
-  .meter i{display:block;height:100%;width:0%;
-    background:linear-gradient(90deg,var(--accent),#f0a061);border-radius:4px;
-    transition:width .5s}
+  .meter i{display:block;height:100%;width:100%;transform:scaleX(0);
+    transform-origin:left center;border-radius:4px;
+    background:linear-gradient(90deg,var(--accent),var(--yellow));
+    transition:transform .5s var(--ease)}
   .setrow{display:flex;align-items:center;gap:var(--s3);min-height:52px;
     padding:var(--s2) 0;border-bottom:1px solid var(--border);font-size:var(--t-md);
     cursor:pointer}
@@ -731,9 +795,10 @@
   .auth{position:fixed;inset:0;background:var(--bg);z-index:50;display:flex;
     align-items:center;justify-content:center;padding:var(--s6)}
   .auth-card{width:100%;max-width:360px;display:flex;flex-direction:column;gap:var(--s3)}
-  .auth-card h1{font-size:var(--t-2xl);font-weight:800;letter-spacing:-.02em;
-    display:flex;align-items:center;gap:var(--s2)}
-  .auth-card p{font-size:var(--t-sm);color:var(--dim);line-height:1.5}
+  .auth-card h1{font-size:var(--t-2xl);font-weight:800;letter-spacing:-.03em;
+    line-height:1.1;display:flex;align-items:center;gap:var(--s2)}
+  .auth-card p{font-size:var(--t-md);color:var(--dim);line-height:1.5;
+    max-width:32ch;margin-bottom:var(--s2)}
   .auth-card input{min-height:50px}
   .auth-err{color:var(--red);font-size:var(--t-sm);min-height:16px}
   .auth-toggle{color:var(--dim);font-size:var(--t-sm);padding:var(--s2);min-height:var(--tap)}
@@ -764,8 +829,10 @@
     .go:hover{box-shadow:var(--sh-accent)}
   }
   .tabbar button:active .ic{transform:scale(.85)}
-  .tabbar button.on .ic{animation:tabpop .34s cubic-bezier(.2,.9,.3,1.5)}
-  @keyframes tabpop{0%{transform:scale(.75)}55%{transform:scale(1.15)}100%{transform:scale(1)}}
+  /* Кривая была с перелётом (1.5 на конце) — иконка отпрыгивала как желе.
+     Реальные предметы тормозят плавно: экспоненциальный выход, без отскока. */
+  .tabbar button.on .ic{animation:tabpop .28s cubic-bezier(.16,1,.3,1)}
+  @keyframes tabpop{0%{transform:scale(.82)}100%{transform:scale(1)}}
   .tabbar button.on::before{animation:tabline .3s var(--ease)}
   @keyframes tabline{from{transform:scaleX(0);opacity:0}to{transform:scaleX(1);opacity:1}}
   .screen.on{animation:screenIn .28s var(--ease)}
@@ -773,7 +840,7 @@
   .step,.umsg,.filecard,.toolcard,.msg.error{animation:msgIn .26s var(--ease)}
   @keyframes msgIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
   .modal.on{animation:fadeIn .2s ease}
-  .modal.on .modal-card{animation:modalIn .3s cubic-bezier(.2,.9,.3,1.35)}
+  .modal.on .modal-card{animation:modalIn .26s cubic-bezier(.16,1,.3,1)}
   .sheet.on .sheet-card{animation:sheetIn .3s var(--ease)}
   @keyframes fadeIn{from{opacity:0}to{opacity:1}}
   @keyframes modalIn{from{opacity:0;transform:translateY(16px) scale(.96)}to{opacity:1;transform:none}}
@@ -809,8 +876,9 @@
   <!-- вход -->
   <div class="auth" id="auth">
     <div class="auth-card" id="authForm">
-      <h1><span style="color:var(--accent)">✳</span> CodePocket</h1>
-      <p id="authDesc">Введите инвайт-код и придумайте имя — через 30 секунд будете писать код с Claude.</p>
+      <h1>CodePocket</h1>
+      <p id="authDesc">Редактор, терминал и агенты для вашего сервера — с телефона.
+      Введите инвайт-код и придумайте имя.</p>
       <input id="aInvite" placeholder="Инвайт-код" autocapitalize="none" autocomplete="off">
       <input id="aName" placeholder="Ваше имя (латиницей: ivan, m-dev...)" autocapitalize="none" autocomplete="off">
       <input id="aPin" class="hidden" placeholder="PIN (6 цифр)" inputmode="numeric" autocomplete="off">
@@ -1008,11 +1076,14 @@
       <button id="aiTabClaude" class="on"><svg viewBox="0 0 24 24" fill="currentColor" style="width:18px;height:18px"><path d="M12 2l1.7 5c.2.5.5.8 1 1L20 9.8l-5.3 1.8c-.5.2-.8.5-1 1L12 18l-1.7-5.4c-.2-.5-.5-.8-1-1L4 9.8l5.3-1.8c.5-.2.8-.5 1-1z"/></svg> Claude</button>
       <button id="aiTabCodex"><svg viewBox="0 0 24 24" fill="#10a37f" style="width:15px;height:15px"><path d="M12 3l7 9-7 9-7-9z"/></svg> Codex</button>
     </div>
-    <div class="projpill">Проект:
-      <select id="aiProjSel" style="flex:1;background:var(--bg3);color:var(--fg);border:1px solid var(--border);border-radius:9px;padding:6px 8px;font-size:13px;max-width:52%"></select>
+    <div class="projpill">
+      <span class="projpill-l">Проект</span>
+      <select id="aiProjSel" class="projpill-sel"></select>
       <b id="aiProjName" style="display:none"></b><span id="aiQuota" style="display:none"></span>
-      <button id="aiImportBtn" title="Подтянуть историю из VS Code / сервера" style="margin-left:auto;background:var(--bg3);border:1px solid var(--border);color:var(--fg);border-radius:10px;padding:8px 10px;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:5px"><svg style="width:14px;height:14px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10h8M8 14h5"/><path d="M21 12a9 9 0 0 1-9 9H3l2.3-2.3A9 9 0 1 1 21 12z"/></svg>Чаты</button>
-      <button id="aiLoginBtn" title="Вход в Claude и Codex" style="margin-left:auto;background:var(--bg3);border:1px solid var(--border);color:var(--fg);border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px"><svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.5-2.3 1a7 7 0 0 0-1.7-1l-.3-2.5h-4l-.3 2.5a7 7 0 0 0-1.7 1l-2.3-1-2 3.5 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.3-1a7 7 0 0 0 1.7 1l.3 2.5h4l.3-2.5a7 7 0 0 0 1.7-1l2.3 1 2-3.5-2-1.5a7 7 0 0 0 .1-1z"/></svg>Вход</button>
+      <div class="projpill-acts">
+        <button id="aiImportBtn" class="pill-btn" title="Подтянуть историю из VS Code / сервера"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 10h8M8 14h5"/><path d="M21 12a9 9 0 0 1-9 9H3l2.3-2.3A9 9 0 1 1 21 12z"/></svg><span>Чаты</span></button>
+        <button id="aiLoginBtn" class="pill-btn" title="Вход в Claude и Codex"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.5-2.3 1a7 7 0 0 0-1.7-1l-.3-2.5h-4l-.3 2.5a7 7 0 0 0-1.7 1l-2.3-1-2 3.5 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.3-1a7 7 0 0 0 1.7 1l.3 2.5h4l.3-2.5a7 7 0 0 0 1.7-1l2.3 1 2-3.5-2-1.5a7 7 0 0 0 .1-1z"/></svg><span>Вход</span></button>
+      </div>
     </div>
     <!-- Claude -->
     <div class="aipanel on" id="panel-claude">
@@ -1222,21 +1293,21 @@
   <!-- вход в Claude / Codex -->
   <div class="modal" id="howtoModal">
     <div class="modal-card">
-      <h3 style="font-size:16px">Как пользоваться CodePocket</h3>
-      <p style="font-size:12.5px;color:var(--dim);margin:0;line-height:1.5">Ты пишешь код с телефона, а выполняется он на твоём сервере. Три шага, чтобы начать:</p>
-      <div class="ht-steps">
-        <div class="ht-step"><span class="ht-n">1</span><div><b>Добавь сервер</b><div class="ht-d">Вкладка «Главная» → «+ Добавить сервер». Впиши адрес своего VPS и способ входа (пароль или SSH-ключ).</div></div></div>
-        <div class="ht-step"><span class="ht-n">2</span><div><b>Создай проект</b><div class="ht-d">Вкладка «Файлы» → создай проект. Это папка с твоим кодом на сервере.</div></div></div>
-        <div class="ht-step"><span class="ht-n">3</span><div><b>Работай с кодом</b><div class="ht-d">«ИИ» — дай задачу Claude или Codex, и они сами правят код. «Консоль» — терминал сервера для команд.</div></div></div>
+      <div class="ht-hero">
+        <div class="ht-title">Ваш код живёт<br>на вашем сервере</div>
+        <p class="ht-lede">CodePocket — это редактор, терминал и агенты, которые
+        работают по SSH на вашей машине. Ничего не выполняется на нашей стороне
+        и не уезжает в чужое облако.</p>
       </div>
-      <div class="ht-legend">
-        <div class="ht-l"><b>🏠 Главная</b> — твои серверы и проекты, отсюда всё начинается</div>
-        <div class="ht-l"><b>📄 Файлы</b> — редактор кода: проекты и файлы</div>
-        <div class="ht-l"><b>💻 Консоль</b> — терминал твоего сервера</div>
-        <div class="ht-l"><b>✨ ИИ</b> — Claude и Codex: пишешь задачу — они делают</div>
-        <div class="ht-l"><b>👤 Профиль</b> — аккаунт, масштаб приложения, выход</div>
+      <div class="ht-next">
+        <div class="ht-next-l">Что дальше</div>
+        <div class="ht-next-t">Подключить сервер</div>
+        <div class="ht-next-d">Любой VPS с доступом по SSH. Пароль подойдёт —
+        ключ сгенерируем сами и покажем команду, которую надо вставить на сервере.
+        Дальше редактор, консоль и агенты просто заработают.</div>
       </div>
-      <button class="go" id="howtoStart">Понятно, начать</button>
+      <button class="go btn-primary" id="howtoStart">Подключить сервер</button>
+      <button class="ht-skip" id="howtoSkip">Осмотрюсь сам</button>
     </div>
   </div>
 
@@ -1274,7 +1345,7 @@
       <div class="ailogin-block" id="aiInstallBlock" style="display:none">
         <div class="ailogin-h"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:17px;height:17px"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M5 21h14"/></svg> Установка на сервере <span class="ailogin-st" id="stInstall">—</span></div>
         <div id="aiInstallMsg" style="font-size:12px;color:var(--dim);line-height:1.5">Проверяю…</div>
-        <div id="aiInstallBar" style="display:none;height:7px;background:var(--bg1);border:1px solid var(--border);border-radius:5px;overflow:hidden"><div id="aiInstallBarFill" style="height:100%;width:0;background:var(--accent);transition:width .5s linear"></div></div>
+        <div id="aiInstallBar" style="display:none;height:7px;background:var(--bg1);border:1px solid var(--border);border-radius:5px;overflow:hidden"><div id="aiInstallBarFill" style="height:100%;width:100%;transform:scaleX(0);transform-origin:left center;background:var(--accent);transition:transform .5s linear"></div></div>
         <button class="go" id="aiInstallBtn" style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px"><svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 11l4 4 4-4"/><path d="M5 21h14"/></svg>Установить Claude + Codex</button>
         <pre id="aiInstallLog" style="display:none;white-space:pre-wrap;word-break:break-word;font-size:10px;line-height:1.4;max-height:170px;overflow:auto;background:var(--bg1);border:1px solid var(--border);border-radius:8px;padding:8px;margin:0"></pre>
       </div>
@@ -1901,7 +1972,7 @@ async function renderTree(){
     try{items=await fsTree(rel);}
     catch(e){
       if(depth===0&&remote){
-        tree.innerHTML='<div style="padding:16px;color:var(--dim);font-size:12.5px;line-height:1.6">Папка <b style="color:var(--fg)">'+remote.workdir+'</b> сейчас недоступна на сервере ('+(e.message||'ошибка')+').<br>Файлы не пропали — просто эта папка не читается. Проверьте, что она есть и терминал подключается к серверу, либо выберите другую папку или вернитесь к локальному проекту.</div><div style="padding:6px 16px;display:flex;gap:8px;flex-wrap:wrap"><button id="ftPick" style="padding:10px 14px;border:none;border-radius:10px;background:var(--accent);color:#fff;font-size:13px;font-weight:600;cursor:pointer">📁 Выбрать папку</button><button id="ftLocal" style="padding:10px 14px;border:1px solid var(--border);border-radius:10px;background:var(--bg3);color:var(--fg);font-size:13px;font-weight:600;cursor:pointer">Работать локально</button></div>';
+        tree.innerHTML='<div style="padding:16px;color:var(--dim);font-size:12.5px;line-height:1.6">Папка <b style="color:var(--fg)">'+remote.workdir+'</b> сейчас недоступна на сервере ('+(e.message||'ошибка')+').<br>Файлы не пропали — просто эта папка не читается. Проверьте, что она есть и терминал подключается к серверу, либо выберите другую папку или вернитесь к локальному проекту.</div><div style="padding:6px 16px;display:flex;gap:8px;flex-wrap:wrap"><button id="ftPick" style="padding:10px 14px;border:none;border-radius:10px;background:var(--accent);color:var(--on-accent);font-size:13px;font-weight:600;cursor:pointer">Выбрать папку</button><button id="ftLocal" style="padding:10px 14px;border:1px solid var(--border);border-radius:10px;background:var(--bg3);color:var(--fg);font-size:13px;font-weight:600;cursor:pointer">Работать локально</button></div>';
         if($('ftPick'))$('ftPick').onclick=openDirPicker;
         if($('ftLocal'))$('ftLocal').onclick=()=>setWorkdir('');
       }else hint('Файлы: '+e.message);
@@ -2660,7 +2731,7 @@ async function loadChat(agent,opts){
   // уже показываем ровно эту ленту и не просят обновить — не дёргаем сервер зря
   if(box.dataset.key===key && box.dataset.loaded==='1' && !(opts&&opts.force))return;
   box.dataset.key=key; box.dataset.loaded=''; box.innerHTML='';
-  if(!proj){box.innerHTML='<div class="guide"><div class="g-ic">📁</div><div class="g-t">Проект не выбран</div><div class="g-s">Выберите проект вверху — или задайте рабочую папку сервера (📁 в консоли), и агент будет работать прямо в ней.</div><button class="g-btn" onclick="go(\'proj\')">📁 К проектам</button></div>';return;}
+  if(!proj){box.innerHTML='<div class="guide"><div class="g-t">Выберите проект</div><div class="g-s">Агент работает внутри одной папки: читает файлы, правит их и запускает код прямо там. Выберите проект вверху — или задайте рабочую папку сервера в консоли, и агент подхватит её вместе с историей чатов из VS Code.</div><button class="g-btn" onclick="go(\'proj\')">К проектам</button></div>';return;}
   box.innerHTML='<div class="skel-row"><div class="skel" style="width:45%"></div><div class="skel" style="width:80%"></div></div>';
   try{
     const r=await api('api/chat?agent='+agent+'&project='+encodeURIComponent(proj));
@@ -2969,7 +3040,7 @@ async function loadUsage(){
     const r=await api('api/usage');
     ROLE=r.role;
     $('pfUsage').textContent=Math.round(r.used/1000)+'k / '+Math.round(r.quota/1000)+'k токенов';
-    $('pfMeter').style.width=Math.min(100,Math.round(r.used/r.quota*100))+'%';
+    $('pfMeter').style.transform='scaleX('+Math.min(1,r.used/r.quota).toFixed(3)+')';
     const roleName=r.role==='dev'?'разработчик':'пользователь';
     $('pfModel').textContent = (typeof TARGET!=='undefined'&&TARGET)
     ? roleName+' · Claude и Codex работают на вашем сервере'
@@ -3334,13 +3405,13 @@ function startInstallProgress(){
     const cur=steps[i], nxt=steps[i+1]; let pct=cur.p;
     if(nxt){const span=Math.max(1,nxt.t-cur.t);pct=cur.p+(nxt.p-cur.p)*Math.min(1,(el-cur.t)/span);}
     else pct=Math.min(97,cur.p+(el-cur.t)*0.1);
-    if(fill)fill.style.width=Math.min(97,pct)+'%';
+    if(fill)fill.style.transform='scaleX('+(Math.min(97,pct)/100).toFixed(3)+')';
     $('stInstall').textContent='⏳ '+cur.s+' · '+el+'с';
   },500);
 }
 function stopInstallProgress(done){
   if(_instTimer){clearInterval(_instTimer);_instTimer=null;}
-  const fill=$('aiInstallBarFill'); if(fill&&done)fill.style.width='100%';
+  const fill=$('aiInstallBarFill'); if(fill&&done)fill.style.transform='scaleX(1)';
 }
 $('aiInstallBtn').onclick=async()=>{
   if(!requireServer())return;
@@ -3448,7 +3519,7 @@ const SVG_DOTS='<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="
 function renderRex(boxId){
   boxId=boxId||'serversList';
   const box=$(boxId); if(!box)return; box.innerHTML='';
-  if(!SERVERS.length){box.innerHTML='<div class="guide"><div class="g-t">Шаг 1 — подключите сервер</div><div class="g-s">Весь код и агенты работают на вашем сервере. Добавьте свой VPS — можно сгенерировать SSH-ключ прямо здесь.</div></div>';renderHomeStats();return;}
+  if(!SERVERS.length){box.innerHTML='<div class="guide"><div class="g-t">Здесь будут ваши серверы</div><div class="g-s">Сервер — это машина, на которой всё происходит: файлы лежат там, команды выполняются там, агенты правят код там же. Подойдёт любой VPS с доступом по SSH.</div></div>';renderHomeStats();return;}
   SERVERS.forEach(s=>{
     const active=s.id===TARGET;
     const el=document.createElement('div');el.className='srvhero'+(active?' active':'');
@@ -3543,7 +3614,7 @@ document.querySelectorAll('#homeSeg button').forEach(b=>b.onclick=()=>{
 });
 function renderHomeProjects(){
   const box=$('homePlist'); if(!box)return; box.innerHTML='';
-  if(!ALLPROJ.length){box.innerHTML='<div class="guide"><div class="g-t">Проектов пока нет</div><div class="g-s">Создайте первый проект, чтобы работать с файлами и агентами.</div></div>';return;}
+  if(!ALLPROJ.length){box.innerHTML='<div class="guide"><div class="g-t">Проектов пока нет</div><div class="g-s">Проект — это папка с кодом. Создайте её из шаблона (Python, сайт, бот, API), и она откроется в редакторе на вкладке «Файлы».</div></div>';return;}
   ALLPROJ.forEach(n=>{
     const el=document.createElement('div');el.className='projrow'+(n===PROJECT?' active':'');
     el.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span></span>'+(n===PROJECT?'<em>активный</em>':'');
@@ -3620,7 +3691,15 @@ function refreshAiEmpty(){
 }
 function openHowto(){$('howtoModal').classList.add('on');}
 if($('pfHowto'))$('pfHowto').onclick=openHowto;
-if($('howtoStart'))$('howtoStart').onclick=()=>{$('howtoModal').classList.remove('on');lsSet('cp_howto_seen','1');if(!TARGET)go('servers');};
+function closeHowto(){$('howtoModal').classList.remove('on');lsSet('cp_howto_seen','1');}
+// Главная кнопка ведёт прямо к делу: открыть Главную и сразу форму сервера.
+// Раньше она просто закрывала окно, и человек оставался наедине с пустым экраном.
+if($('howtoStart'))$('howtoStart').onclick=()=>{
+  closeHowto();
+  go('servers');
+  if(!SERVERS.length && $('serversAdd')) setTimeout(()=>$('serversAdd').click(), 260);
+};
+if($('howtoSkip'))$('howtoSkip').onclick=()=>{closeHowto();if(!TARGET)go('servers');};
 
 /* ═══ рабочая папка сервера (как VS Code Remote-SSH) ═══ */
 let DIRPATH='';
