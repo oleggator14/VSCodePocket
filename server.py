@@ -2615,8 +2615,17 @@ class Handler(BaseHTTPRequestHandler):
                        'command -v node >/dev/null 2>&1 && echo N; '
                        'command -v claude >/dev/null 2>&1 && echo CI; '
                        'command -v codex >/dev/null 2>&1 && echo XI; '
-                       'test -s "$HOME/.claude/.credentials.json" && echo C; '
-                       'test -s "$HOME/.codex/auth.json" && echo X')
+                       # Наличия файла мало. При выходе из аккаунта Claude и
+                       # Codex оставляют .credentials.json / auth.json на
+                       # месте, только вычищают из него токен — файл при этом
+                       # непустой, и проверка «test -s» показывала «вход
+                       # выполнен», хотя войти уже нельзя. Ищем сам токен.
+                       'grep -qE \'"(accessToken|access_token|sessionKey|refreshToken)"[[:space:]]*:'
+                       '[[:space:]]*"[^"]+"\' "$HOME/.claude/.credentials.json" '
+                       '2>/dev/null && echo C; '
+                       'grep -qE \'"(access_token|accessToken|OPENAI_API_KEY|id_token)"[[:space:]]*:'
+                       '[[:space:]]*"[^"]+"\' "$HOME/.codex/auth.json" '
+                       '2>/dev/null && echo X')
                 rc, o, e = ssh_exec(srv, "bash -lc " + shlex.quote(chk), timeout=25)
                 # разбираем по отдельным токенам (строкам), чтобы «C» не совпало с «CI»
                 toks = set(o.decode("utf-8", "replace").split())

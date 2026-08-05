@@ -871,13 +871,28 @@
   .attchip .attx:active{background:var(--bg2);color:var(--red)}
   /* Одна левая граница у ленты, чипсов и поля ввода: было 16 / 16 / 12,
      и коробка ввода заметно съезжала влево относительно всего остального. */
-  /* Поле ввода стояло слишком высоко над нижним меню: сверху отступ был вдвое
-     меньше нижнего, и коробка «висела» ближе к ленте, чем к краю экрана. */
+  /* Поле ввода висело высоко над нижним меню по двум причинам, и в прошлый
+     раз я исправил его не в ту сторону — увеличил нижний отступ, отчего
+     коробка уехала ещё выше.
+     Первая: безопасную зону под home-индикатор добавляли И это поле, И таббар
+     под ним — то есть дважды. Вторая: собственный нижний отступ был больше
+     верхнего. Зону снизу оставляем только таббару, отступы делаем равными. */
   .chat-inp{display:flex;gap:var(--s2);align-items:flex-end;
-    padding:var(--s3) var(--s4) calc(var(--s4) + env(safe-area-inset-bottom));
+    padding:var(--s2) var(--s4);
     border-top:1px solid var(--border);background:var(--bg)}
+  /* когда таббара нет (открыта клавиатура) — зону добавляет само поле */
+  body.kbd .chat-inp{padding-bottom:calc(var(--s2) + env(safe-area-inset-bottom))}
   .chat-inp textarea{flex:1;min-height:var(--tap);max-height:120px;
     border-radius:var(--r);resize:none;line-height:1.4}
+  /* Выход из набора. Появляется только когда клавиатура на экране: в покое
+     занимать место в узкой строке ей незачем. */
+  .kbd-off{display:none;width:var(--tap);height:var(--tap);flex-shrink:0;
+    border-radius:var(--r);background:var(--bg2);border:1px solid var(--border);
+    color:var(--dim);align-items:center;justify-content:center}
+  .kbd-off svg{width:20px;height:20px}
+  .kbd-off:active{background:var(--accent-soft);color:var(--accent);
+    border-color:var(--accent-line)}
+  body.kbd .chat-inp .kbd-off{display:inline-flex}
   .chat-inp .attbtn{width:var(--tap);height:var(--tap);border-radius:var(--r);
     color:var(--dim);flex-shrink:0;display:inline-flex;align-items:center;
     justify-content:center;border:1px solid var(--border);background:var(--bg2)}
@@ -1302,6 +1317,7 @@
       <div class="chat-inp">
         <button class="attbtn" id="attBtn" title="Прикрепить фото или файл"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5 12.4 19a4.6 4.6 0 0 1-6.5-6.5l7.9-7.9a3.1 3.1 0 0 1 4.4 4.4l-7.9 7.9a1.6 1.6 0 0 1-2.2-2.2l7.2-7.2"/></svg></button>
         <input type="file" id="attFile" class="hidden" multiple accept="image/*,.txt,.md,.json,.csv,.log,.py,.js,.ts,.html,.css,.pdf,.zip">
+        <button class="kbd-off" title="Скрыть клавиатуру"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
         <textarea id="chatInp" placeholder="Что сделать с кодом? (Claude)" rows="1"></textarea>
         <button id="chatSend" title="Отправить"><svg viewBox="0 0 24 24" fill="currentColor" style="width:20px;height:20px"><path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12 2-12 2z"/></svg></button>
       </div>
@@ -1318,6 +1334,7 @@
       <div class="chat-inp">
         <button class="attbtn" id="attBtnCx" title="Прикрепить фото или файл"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.5 12.4 19a4.6 4.6 0 0 1-6.5-6.5l7.9-7.9a3.1 3.1 0 0 1 4.4 4.4l-7.9 7.9a1.6 1.6 0 0 1-2.2-2.2l7.2-7.2"/></svg></button>
         <input type="file" id="attFileCx" class="hidden" multiple accept="image/*,.txt,.md,.json,.csv,.log,.py,.js,.ts,.html,.css,.pdf,.zip">
+        <button class="kbd-off" title="Скрыть клавиатуру"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
         <textarea id="chatInpCx" placeholder="Что сделать с кодом? (Codex)" rows="1"></textarea>
         <button id="chatSendCx" title="Отправить"><svg viewBox="0 0 24 24" fill="currentColor" style="width:20px;height:20px"><path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12 2-12 2z"/></svg></button>
       </div>
@@ -2213,6 +2230,11 @@ document.querySelectorAll('.key[data-k]').forEach(k=>k.addEventListener('click',
 // Явный выход из набора: убрать фокус — клавиатура телефона уедет сама.
 // Раньше выхода не было вовсе: закрыть её можно было только системным жестом,
 // а на экране в этот момент не оставалось ничего, что подсказывало бы как.
+// кнопки «скрыть клавиатуру» в лентах Claude и Codex
+document.querySelectorAll('.kbd-off').forEach(b=>{
+  b.addEventListener('mousedown',e=>e.preventDefault());
+  b.addEventListener('click',e=>{e.preventDefault();dismissKeyboard();});
+});
 function dismissKeyboard(){
   const a=document.activeElement; if(a&&a.blur)a.blur();
   // класс снимет updateKbdState, когда место реально освободится
@@ -3810,17 +3832,26 @@ async function openAiLogin(){
   if(!TARGET)return;
   try{
     const r=await api('api/aistatus?server='+encodeURIComponent(TARGET));
-    // если на сервере вход уже есть (подписка или ключ) — не предлагаем входить
-    // повторно: прячем кнопку «Войти по подписке» и пишем, что делать ничего не надо.
+    /* Кнопку входа НЕ прячем никогда. Раньше при «вход уже есть» она убиралась
+       совсем — и если статус определился неверно (например, вы вышли из Claude
+       на сервере, а файл с ключами остался), войти было нечем: тупик без
+       выхода. Теперь меняется только подпись. */
     const setSt=(agent,keySet,sub,inst)=>{
       const stEl=$(agent==='claude'?'stClaude':'stCodex');
       const subBtn=$(agent==='claude'?'claudeSub':'codexSub');
-      if(inst===false){stEl.textContent='⚠ не установлен';stEl.style.color='';if(subBtn)subBtn.style.display='';return;}
+      if(subBtn)subBtn.style.display='';
+      if(inst===false){
+        stEl.textContent='не установлен'; stEl.style.color='';
+        if(subBtn)subBtn.textContent='Войти по подписке';
+        return;
+      }
       if(keySet||sub){
-        stEl.textContent=keySet?'🔑 по API-ключу — готово':'✔ вход уже есть — ничего вводить не нужно';
-        stEl.style.color='#3ecf8e'; if(subBtn)subBtn.style.display='none';
+        stEl.textContent=keySet?'по API-ключу — готово':'вход есть';
+        stEl.style.color='var(--accent)';
+        if(subBtn)subBtn.textContent='Войти заново';
       }else{
-        stEl.textContent='✕ не вошёл'; stEl.style.color=''; if(subBtn)subBtn.style.display='';
+        stEl.textContent='не вошёл'; stEl.style.color='';
+        if(subBtn)subBtn.textContent='Войти по подписке';
       }
     };
     setSt('claude',r.claude_key,r.claude_sub,r.claude_installed);
