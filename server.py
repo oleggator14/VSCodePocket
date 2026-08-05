@@ -2793,6 +2793,12 @@ class Handler(BaseHTTPRequestHandler):
                 d = json.loads(self._body() or b"{}")
             except (ValueError, json.JSONDecodeError):
                 d = {}
+            if d.get("jsError"):
+                # ошибка JS на клиенте — она убивает весь скрипт разом
+                audit("client_js_error", ip=self._client_ip(),
+                      err=str(d.get("jsError"))[:160], at=str(d.get("at"))[:60],
+                      ua=(self.headers.get("User-Agent") or "")[:70])
+                return self._json({"ok": True})
             audit("client_diag", ip=self._client_ip(),
                   ua=(self.headers.get("User-Agent") or "")[:70],
                   sdk=bool(d.get("sdk")), sdk_init_len=int(d.get("sdkInitLen") or 0),

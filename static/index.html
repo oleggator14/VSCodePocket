@@ -1554,6 +1554,20 @@
 <script src="vendor/mode-css.min.js"></script>
 <script>
 "use strict";
+/* Весь код приложения — один скрипт, поэтому ЛЮБАЯ ошибка на верхнем уровне
+   убивает его целиком: на экране остаётся отрисованная разметка (в том числе
+   форма входа), а на сервер не уходит ни одного запроса. Снаружи это выглядит
+   как «приложение просит инвайт-код» и не отличимо от проблемы со входом.
+   Ловим такие ошибки и отправляем на сервер — чтобы их было видно. */
+window.addEventListener('error',function(ev){
+  try{
+    var b=new XMLHttpRequest();
+    b.open('POST', (location.pathname.endsWith('/')?location.pathname:location.pathname+'/')+'api/diag', true);
+    b.setRequestHeader('Content-Type','application/json');
+    b.send(JSON.stringify({jsError:String(ev.message||'').slice(0,160),
+                           at:(String(ev.filename||'').split('/').pop()||'')+':'+(ev.lineno||0)}));
+  }catch(e){}
+});
 const $=id=>document.getElementById(id);
 const hint=t=>{const h=$('hint');h.textContent=t;h.classList.add('show');
   clearTimeout(h._t);h._t=setTimeout(()=>h.classList.remove('show'),2200);};
@@ -1592,9 +1606,19 @@ let AITAB=lsGet('cp_aitab')||'claude';
 // Работать агенту пока не с чем: нет сервера либо не выбраны ни проект,
 // ни рабочая папка. Тогда вместо переписки показывается пустое состояние.
 function aiBlocked(){
-  if(!TARGET)return true;
-  const folder = (typeof rfsSrv==='function') && rfsSrv();
-  return !PROJECT && !folder;
+  // TARGET и PROJECT объявлены через let НИЖЕ по файлу, а aiSelect() зовут с
+  // верхнего уровня выше этой строки. До своего объявления let-переменная
+  // недоступна (временная мёртвая зона) и обращение к ней бросает
+  // ReferenceError — причём typeof от этого не спасает. Один такой бросок
+  // убивал весь скрипт приложения: страница оставалась с формой входа, и на
+  // сервер не уходило ни одного запроса.
+  try{
+    if(!TARGET)return true;
+    const folder = (typeof rfsSrv==='function') && rfsSrv();
+    return !PROJECT && !folder;
+  }catch(e){
+    return false;   // на этапе загрузки ещё нечего блокировать
+  }
 }
 function aiSelect(agent){
   AITAB=agent; lsSet('cp_aitab',agent);
