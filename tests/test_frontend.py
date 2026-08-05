@@ -15,6 +15,7 @@
 конца. Пропускается, если Node недоступен.
 """
 
+import json
 import os
 import re
 import shutil
@@ -120,6 +121,20 @@ def inline_script():
     blocks = re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>",
                         html, re.S)
     return blocks
+
+
+def js_functions(*sigs):
+    """Вырезает названные функции из инлайнового скрипта, чтобы проверять их
+    в Node по отдельности."""
+    src = inline_script()[0]
+    out = []
+    for sig in sigs:
+        i = src.index(sig)
+        if sig.startswith("const"):
+            out.append(src[i:src.index("\n", i) + 1])
+        else:
+            out.append(src[i:src.index("\n}", i) + 2] + "\n")
+    return "\n".join(out)
 
 
 @unittest.skipUnless(node_available(), "нет node — проверка пропущена")
@@ -268,7 +283,12 @@ class ConsoleLinks(unittest.TestCase):
     def _run(self, rows_js, tail):
         src = inline_script()[0]
         text_fn = re.search(r"function consoleText\(\)\{[\s\S]*?\n\}", src).group(0)
-        links_fn = re.search(r"function consoleLinks\(text\)\{[\s\S]*?\n\}", src).group(0)
+        # consoleLinks опирается на помощников склейки — берём их тоже,
+        # иначе тест падает не на логике, а на отсутствии функции
+        links_fn = js_functions("const BOXCHARS", "function deboxLine",
+                                "function looksLikeUrlTail",
+                                "function joinBrokenUrls",
+                                "function consoleLinks")
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "links.js")
             with open(path, "w", encoding="utf-8") as f:
@@ -312,6 +332,62 @@ class ConsoleLinks(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr[-400:])
         self.assertIn("U=https://example.com/auth?a=1", r.stdout)
         self.assertNotIn("a=1.", r.stdout)
+
+
+@unittest.skipUnless(node_available(), "нет node — проверка пропущена")
+class BrokenUrlJoin(unittest.TestCase):
+    """Ссылка входа рвалась по строкам. Признака переноса недостаточно:
+    полноэкранные программы (Claude Code, Codex) рисуют каждую визуальную
+    строку отдельно и обрамляют рамкой — флага переноса на них нет, и URL
+    обрывался там, где кончалась строка (у пользователя — на «code=»)."""
+
+    def _fns(self):
+        return js_functions("const BOXCHARS", "function deboxLine",
+                            "function looksLikeUrlTail", "function joinBrokenUrls",
+                            "function consoleLinks")
+
+    def _links(self, lines):
+        js = self._fns() + ("\nconsole.log(JSON.stringify(consoleLinks(%s.join('\\n'))));"
+                            % json.dumps(lines))
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "u.js")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(js)
+            r = subprocess.run(["node", path], capture_output=True, text=True,
+                               timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr[-400:])
+        return json.loads(r.stdout.strip().splitlines()[-1])
+
+    URL = ("https://claude.ai/oauth/authorize?code=true&client_id=9d1c250a"
+           "&response_type=code&scope=org%3Acreate_api_key")
+
+    def test_boxed_url_broken_at_code(self):
+        got = self._links([
+            "\u2502 https://claude.ai/oauth/authorize?code=  \u2502",
+            "\u2502 true&client_id=9d1c250a&response_type=c  \u2502",
+            "\u2502 ode&scope=org%3Acreate_api_key           \u2502",
+        ])
+        self.assertEqual(got[:1], [self.URL])
+
+    def test_two_urls_do_not_merge(self):
+        got = self._links(["https://a.example/one", "https://b.example/two"])
+        self.assertEqual(sorted(got),
+                         ["https://a.example/one", "https://b.example/two"],
+                         "две отдельные ссылки склеились в одну")
+
+    def test_prose_after_url_not_appended(self):
+        got = self._links(["https://example.com/a?x=1",
+                           "Paste code here if prompted"])
+        self.assertEqual(got[:1], ["https://example.com/a?x=1"])
+
+    def test_plain_wrap_without_box(self):
+        got = self._links(["https://example.com/very/long/path?token=",
+                           "abc123def456"])
+        self.assertEqual(got[:1],
+                         ["https://example.com/very/long/path?token=abc123def456"])
+
+    def test_no_links(self):
+        self.assertEqual(self._links(["hello", "world"]), [])
 
 
 if __name__ == "__main__":
