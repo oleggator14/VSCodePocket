@@ -110,6 +110,66 @@ TEMPLATES = {
     "cpp": {"main.cpp": '// C++\n// компиляция: g++ main.cpp -o main && ./main\n'
             '#include <iostream>\nusing namespace std;\n\nint main() {\n'
             '    cout << "Привет из C++!" << endl;\n    return 0;\n}\n'},
+    # Комбинированный: бэкенд на Python и фронтенд рядом, в одной папке.
+    # Раньше приходилось выбирать «или сайт, или Flask» и дописывать вторую
+    # половину руками — а это самый частый вид проекта.
+    "web": {
+        "app.py": '# Бэкенд на Flask: отдаёт страницу и простой API.\n'
+                  '# запуск:  pip install flask && python app.py\n'
+                  'from flask import Flask, jsonify, send_from_directory\n\n'
+                  'app = Flask(__name__, static_folder="static", static_url_path="")\n\n\n'
+                  '@app.route("/")\n'
+                  'def index():\n'
+                  '    return send_from_directory("static", "index.html")\n\n\n'
+                  '@app.route("/api/hello")\n'
+                  'def hello():\n'
+                  '    return jsonify(message="Привет из Python!")\n\n\n'
+                  'if __name__ == "__main__":\n'
+                  '    app.run(host="0.0.0.0", port=8000, debug=True)\n',
+        "static/index.html": '<!DOCTYPE html>\n<html lang="ru">\n<head>\n'
+                  '<meta charset="utf-8">\n'
+                  '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+                  '<title>Мой проект</title>\n'
+                  '<link rel="stylesheet" href="style.css">\n</head>\n<body>\n'
+                  '  <main>\n    <h1>Работает</h1>\n'
+                  '    <p id="msg">Нажмите кнопку — фронтенд спросит бэкенд.</p>\n'
+                  '    <button id="go">Спросить сервер</button>\n  </main>\n'
+                  '<script src="app.js"></script>\n</body>\n</html>\n',
+        "static/style.css": ':root{--bg:#0f1115;--fg:#e8ecf3;--accent:#3ddc84}\n'
+                  '*{box-sizing:border-box}\n'
+                  'body{margin:0;min-height:100vh;display:grid;place-items:center;\n'
+                  '  background:var(--bg);color:var(--fg);\n'
+                  '  font-family:system-ui,-apple-system,sans-serif}\n'
+                  'main{text-align:center;padding:24px}\n'
+                  'h1{margin:0 0 12px;font-size:32px;letter-spacing:-.02em}\n'
+                  'p{margin:0 0 20px;opacity:.75;line-height:1.5}\n'
+                  'button{padding:12px 20px;border:0;border-radius:12px;\n'
+                  '  background:var(--accent);color:#04140b;font-size:16px;\n'
+                  '  font-weight:600;cursor:pointer}\n'
+                  'button:active{opacity:.85}\n',
+        "static/app.js": 'const btn = document.getElementById("go");\n'
+                  'const msg = document.getElementById("msg");\n\n'
+                  'btn.addEventListener("click", async () => {\n'
+                  '  btn.disabled = true;\n'
+                  '  try {\n'
+                  '    const r = await fetch("/api/hello");\n'
+                  '    const data = await r.json();\n'
+                  '    msg.textContent = data.message;\n'
+                  '  } catch (e) {\n'
+                  '    msg.textContent = "Сервер не ответил: " + e.message;\n'
+                  '  } finally {\n'
+                  '    btn.disabled = false;\n'
+                  '  }\n'
+                  '});\n',
+        "README.md": '# Проект\n\nPython-бэкенд плюс фронтенд в одной папке.\n\n'
+                  '| Файл | Что делает |\n|---|---|\n'
+                  '| `app.py` | сервер на Flask: отдаёт страницу и `/api/hello` |\n'
+                  '| `static/index.html` | разметка страницы |\n'
+                  '| `static/style.css` | оформление |\n'
+                  '| `static/app.js` | логика в браузере, ходит в API |\n\n'
+                  '## Запуск\n\n```bash\npip install flask\npython app.py\n```\n\n'
+                  'Откроется на порту 8000.\n',
+    },
     "empty": {},
 }
 _agent_busy = set()       # пользователи, у которых агент сейчас работает
@@ -3740,7 +3800,21 @@ class Handler(BaseHTTPRequestHandler):
             os.makedirs(proj)
             os.chown(proj, uid, gid)
             for fname, content in TEMPLATES[template].items():
-                fp = os.path.join(proj, fname)
+                # Имя в шаблоне может содержать подпапку (static/app.js) —
+                # создаём её и передаём владельцу вместе с файлом, иначе
+                # шаблон с вложенностью падал бы на открытии файла.
+                rel = fname.replace("\\", "/").strip("/")
+                if ".." in rel.split("/"):
+                    continue                       # шаблоны наши, но проверим
+                fp = os.path.join(proj, *rel.split("/"))
+                sub = os.path.dirname(fp)
+                if sub != proj and not os.path.isdir(sub):
+                    os.makedirs(sub, exist_ok=True)
+                    # владельцем должен стать пользователь, а не root
+                    cur = sub
+                    while cur != proj:
+                        os.chown(cur, uid, gid)
+                        cur = os.path.dirname(cur)
                 with open(fp, "w", encoding="utf-8") as f:
                     f.write(content)
                 os.chown(fp, uid, gid)

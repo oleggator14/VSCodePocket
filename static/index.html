@@ -586,13 +586,16 @@
   .noserv button{min-height:var(--tap);padding:0 var(--s5);border-radius:var(--r);
     background:var(--accent);color:var(--on-accent);font-size:var(--t-md);font-weight:600}
   /* нижний отступ был нулевой — кнопки упирались в коробку ввода */
-  .quickrow{display:flex;gap:var(--s2);padding:var(--s3) var(--s3);background:var(--bg2)}
+  .quickrow{display:flex;gap:var(--s2);padding:var(--s3) var(--s3) var(--s2);
+    background:var(--bg2);border-top:1px solid var(--border)}
   .quickrow button{flex:1;min-height:var(--tap);border-radius:var(--r-sm);
     background:var(--bg3);border:1px solid var(--border);color:var(--fg);
     font-size:var(--t-md);font-weight:600}
   .quickrow button:active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-  .cmdbar{display:flex;gap:var(--s2);padding:0 var(--s3) var(--s3);background:var(--bg2);
-    flex-shrink:0}
+  /* низ консоли — одна поверхность: ряд действий, клавиши и ввод. Разные
+     подложки читались как разлом и дёргались при перерисовке. */
+  .cmdbar{display:flex;gap:var(--s2);padding:var(--s2) var(--s3) var(--s3);
+    background:var(--bg2);flex-shrink:0}
   .cmdbar input{flex:1;min-height:var(--tap);font-family:var(--mono);border-radius:var(--r)}
   .cmdbar button{flex:0 0 auto;min-width:52px;border-radius:var(--r);
     background:var(--accent);color:var(--on-accent);font-size:var(--t-xl);font-weight:700}
@@ -638,9 +641,8 @@
      их только пустота. Теперь у неё своя подложка, рамки сверху и снизу и
      собственный отступ — граница между «клавиши» и «ввод» видна однозначно. */
   .kbdbar{display:none;gap:var(--s2);align-items:center;
-    padding:var(--s2) var(--s3);background:var(--bg1);
-    border-top:1px solid var(--border);border-bottom:1px solid var(--border);
-    margin-bottom:var(--s3);flex-shrink:0}
+    padding:var(--s3) var(--s3) var(--s2);background:var(--bg2);
+    border-top:1px solid var(--border);flex-shrink:0}
   .kbdbar-keys{flex:1;min-width:0;display:flex;gap:var(--s2);
     overflow-x:auto;scrollbar-width:none;
     /* последний клавише даём дотянуться до края, но не под соседа */
@@ -843,8 +845,10 @@
   .attchip .attx:active{background:var(--bg2);color:var(--red)}
   /* Одна левая граница у ленты, чипсов и поля ввода: было 16 / 16 / 12,
      и коробка ввода заметно съезжала влево относительно всего остального. */
+  /* Поле ввода стояло слишком высоко над нижним меню: сверху отступ был вдвое
+     меньше нижнего, и коробка «висела» ближе к ленте, чем к краю экрана. */
   .chat-inp{display:flex;gap:var(--s2);align-items:flex-end;
-    padding:var(--s2) var(--s4) calc(var(--s3) + env(safe-area-inset-bottom));
+    padding:var(--s3) var(--s4) calc(var(--s4) + env(safe-area-inset-bottom));
     border-top:1px solid var(--border);background:var(--bg)}
   .chat-inp textarea{flex:1;min-height:var(--tap);max-height:120px;
     border-radius:var(--r);resize:none;line-height:1.4}
@@ -1054,6 +1058,7 @@
       <select id="npTpl">
         <option value="python">Python</option>
         <option value="site">Сайт (HTML/CSS/JS)</option>
+        <option value="web">Python + сайт (Flask + HTML/CSS/JS)</option>
         <option value="flask">Flask-сайт</option>
         <option value="api">FastAPI</option>
         <option value="bot">TG-бот</option>
@@ -2809,11 +2814,20 @@ function applyViewport(){
    Просевшая высота — чтобы она не вернулась раньше, чем клавиатура уехала:
    после blur фокуса уже нет, а место ещё занято. */
 let _kbFull = 0;
-function fieldFocused(){
-  const a = document.activeElement;
-  return !!a && /^(INPUT|TEXTAREA)$/.test(a.tagName) &&
-         a.type !== 'checkbox' && a.type !== 'radio' && a.type !== 'file';
+/* Настоящее ли это поле ввода, от которого поднимется клавиатура.
+
+   Терминал xterm.js держит СВОЁ скрытое поле и забирает в него фокус сразу
+   при подключении — без всякого участия человека. Мы считали это открытой
+   клавиатурой и прятали панель клавиш: при заходе в консоль её просто не
+   было, и появлялась она лишь после того, как подёргаешь настоящую. */
+function isRealField(a){
+  if(!a || !/^(INPUT|TEXTAREA)$/.test(a.tagName))return false;
+  if(a.type==='checkbox'||a.type==='radio'||a.type==='file')return false;
+  if(a.classList && a.classList.contains('xterm-helper-textarea'))return false;
+  if(a.closest && a.closest('.xterm'))return false;   // любое поле внутри терминала
+  return true;
 }
+function fieldFocused(){ return isRealField(document.activeElement); }
 function updateKbdState(h){
   const focused = fieldFocused();
   if(!focused && h > _kbFull) _kbFull = h;      // ориентир копим без клавиатуры
@@ -2855,7 +2869,7 @@ applyViewport(); settleViewport();
    полного экрана, поле уезжало под клавиатуру, а карточка сжимала его
    в полоску. Теперь про клавиатуру знает любое поле. */
 (function(){
-  const isField=el=>el&&/^(INPUT|TEXTAREA)$/.test(el.tagName)&&el.type!=='checkbox'&&el.type!=='radio'&&el.type!=='file';
+  const isField=isRealField;   // общая проверка: скрытое поле терминала не в счёт
   let scrollTimer=0;
   document.addEventListener('focusin',e=>{
     if(!isField(e.target))return;
@@ -4261,7 +4275,18 @@ function sendDiag(initData){
 
 (function(){
   const tg = window.Telegram && window.Telegram.WebApp;
-  if(tg){ try{ tg.ready(); tg.expand(); if(tg.setHeaderColor)tg.setHeaderColor('#0a0c10'); if(tg.setBackgroundColor)tg.setBackgroundColor('#0a0c10'); }catch(e){} }
+  if(tg){ try{
+    tg.ready(); tg.expand();
+    // Шапку красим в цвет ВЕРХНЕЙ панели приложения (--bg2), а не в почти
+    // чёрный: раньше стоял #0a0c10, шапка выглядела чужой чёрной полосой над
+    // серой панелью, а на анимации клавиатуры перекрашивалась туда-обратно.
+    // Один цвет на шапку и панель — стык не виден и не мигает.
+    if(tg.setHeaderColor)tg.setHeaderColor('#141821');
+    if(tg.setBackgroundColor)tg.setBackgroundColor('#0a0c11');
+    // высоту держим сами, Telegram пусть не сворачивает окно свайпом вниз —
+    // иначе жест по терминалу закрывает мини-апп
+    if(tg.disableVerticalSwipes)tg.disableVerticalSwipes();
+  }catch(e){} }
   const initData = tgInitData();
   const inTg = initData.length>10;
   sendDiag(initData);
