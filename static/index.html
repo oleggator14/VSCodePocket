@@ -4599,24 +4599,38 @@ let _tgThemed=false;
 function applyTgTheme(){
   const tg = window.Telegram && window.Telegram.WebApp;
   if(!tg || _tgThemed) return !!tg;
+  /* Отмечаем выполнение СРАЗУ, до единого вызова.
+
+     Иначе получается вот что: SDK Telegram бросает исключение на методах,
+     которых нет в версии клиента (например disableVerticalSwipes появился
+     только в 7.7). Исключение прерывало функцию до отметки, цикл повторов
+     считал работу невыполненной и заходил снова — и так каждые 150 мс:
+     expand() дёргал размер окна, размер тянул за собой пересчёт раскладки,
+     и экран мерцал. Один сбойный вызов не должен отменять остальные, поэтому
+     каждый обёрнут отдельно. */
+  _tgThemed=true;
+  const v=parseFloat(tg.version||'0');
+  const call=(fn,...a)=>{ try{ if(typeof fn==='function')fn.apply(tg,a); }catch(e){} };
+  call(tg.ready);
+  call(tg.expand);
+  if(v>=7.7) call(tg.disableVerticalSwipes);
+
+  /* Цвет шапки: сначала пробуем СВОЙ, и только если клиент его не принял —
+     ключевое слово темы. По версии не гадаем: она бывает пустой, и тогда мы
+     уходили в ветку темы зря.
+
+     Ключевые слова — крайний случай, и вот почему: штатная тёмная тема
+     Telegram синяя (#17212b). Прошлая версия на всякий случай просила
+     bg_color для фона — и приложение заливало синим. Фон окна вообще не
+     трогаем: наш body и так закрывает экран целиком, а любой чужой цвет там
+     виден только по краям и только мешает. */
   try{
-    // ready/expand тоже могли не выполниться при поздней загрузке SDK —
-    // тогда мини-апп оставался в половину экрана
-    tg.ready && tg.ready();
-    tg.expand && tg.expand();
-    tg.disableVerticalSwipes && tg.disableVerticalSwipes();
-    // hex понимают клиенты Bot API 6.9+; на старых он молча игнорируется,
-    // поэтому там просим ключевое слово темы
-    const v=parseFloat(tg.version||'0');
-    if(tg.setHeaderColor){
-      if(v>=6.9) tg.setHeaderColor('#141821'); else tg.setHeaderColor('secondary_bg_color');
-    }
-    if(tg.setBackgroundColor){
-      if(v>=6.9) tg.setBackgroundColor('#0a0c11'); else tg.setBackgroundColor('bg_color');
-    }
-    if(tg.setBottomBarColor && v>=7.10) tg.setBottomBarColor('#141821');
-    _tgThemed=true;
-  }catch(e){}
+    if(typeof tg.setHeaderColor==='function') tg.setHeaderColor('#141821');
+  }catch(e){
+    try{ tg.setHeaderColor('secondary_bg_color'); }catch(_){}
+  }
+  try{ if(typeof tg.setBackgroundColor==='function') tg.setBackgroundColor('#0a0c11'); }catch(e){}
+  if(v>=7.10) call(tg.setBottomBarColor,'#141821');
   return true;
 }
 // повторяем, пока SDK не подъедет: он грузится асинхронно и может опоздать
