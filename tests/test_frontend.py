@@ -254,5 +254,65 @@ class KeyboardState(unittest.TestCase):
         self.assertIn("closed:false", r.stdout)
 
 
+@unittest.skipUnless(node_available(), "нет node — проверка пропущена")
+class ConsoleLinks(unittest.TestCase):
+    """Ссылку для входа в агента нельзя было скопировать: терминал разбивает
+    длинную строку на несколько экранных, а мы соединяли их переводом строки —
+    URL рвался пополам. Проверяем, что склейка возвращает его целиком."""
+
+    URL = ("https://claude.ai/oauth/authorize?client_id=9d1c250a"
+           "&response_type=code&redirect_uri=https%3A%2F%2Fconsole.anthropic.com"
+           "%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_key"
+           "&code_challenge=AbCdEf123456")
+
+    def _run(self, rows_js, tail):
+        src = inline_script()[0]
+        text_fn = re.search(r"function consoleText\(\)\{[\s\S]*?\n\}", src).group(0)
+        links_fn = re.search(r"function consoleLinks\(text\)\{[\s\S]*?\n\}", src).group(0)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "links.js")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(rows_js)
+                f.write(text_fn.replace("const buf=term.buffer.active;", "const buf=BUF;"))
+                f.write("\n" + links_fn + "\n")
+                f.write(tail)
+            return subprocess.run(["node", path], capture_output=True,
+                                  text=True, timeout=30)
+
+    def _rows(self, url, width=58):
+        parts = [url[i:i + width] for i in range(0, len(url), width)]
+        js = ["const R=[{t:'Use the url below to sign in:',w:false}];"]
+        for i, p in enumerate(parts):
+            js.append("R.push({t:%r,w:%s});" % (p, "true" if i else "false"))
+        js.append("R.push({t:'Paste code here >',w:false});")
+        js.append("global.BUF={length:R.length,getLine:i=>"
+                  "({translateToString:()=>R[i].t,isWrapped:R[i].w})};")
+        return "\n".join(js).replace("'", '"') + "\n"
+
+    def test_wrapped_url_is_joined_back(self):
+        r = self._run(self._rows(self.URL),
+                      "const L=consoleLinks(consoleText());"
+                      "console.log(L.length===1 && L[0]===%s ? 'OK' : 'BAD:'+L[0]);"
+                      % ('"' + self.URL + '"'))
+        self.assertEqual(r.returncode, 0, r.stderr[-400:])
+        self.assertIn("OK", r.stdout,
+                      "ссылка собралась неверно: " + r.stdout.strip())
+
+    def test_no_links_gives_empty(self):
+        rows = ("global.BUF={length:2,getLine:i=>({translateToString:()=>"
+                '["hello","world"][i],isWrapped:false})};\n')
+        r = self._run(rows, "console.log('N='+consoleLinks(consoleText()).length);")
+        self.assertEqual(r.returncode, 0, r.stderr[-400:])
+        self.assertIn("N=0", r.stdout)
+
+    def test_trailing_punctuation_trimmed(self):
+        rows = ("global.BUF={length:1,getLine:()=>({translateToString:()=>"
+                '"open https://example.com/auth?a=1.",isWrapped:false})};\n')
+        r = self._run(rows, "console.log('U='+consoleLinks(consoleText())[0]);")
+        self.assertEqual(r.returncode, 0, r.stderr[-400:])
+        self.assertIn("U=https://example.com/auth?a=1", r.stdout)
+        self.assertNotIn("a=1.", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

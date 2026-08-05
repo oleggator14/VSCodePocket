@@ -617,9 +617,10 @@
   .quickrow{display:flex;gap:var(--s2);padding:var(--s3) var(--s3) var(--s2);
     background:var(--bg2);border-top:1px solid var(--border);
     contain:layout paint}
-  .quickrow button{flex:1;min-height:var(--tap);border-radius:var(--r-sm);
+  .quickrow button{flex:1;min-width:0;min-height:var(--tap);border-radius:var(--r-sm);
     background:var(--bg3);border:1px solid var(--border);color:var(--fg);
-    font-size:var(--t-md);font-weight:600}
+    font-size:var(--t-sm);font-weight:600;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;padding:0 6px}
   .quickrow button:active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
   /* низ консоли — одна поверхность: ряд действий, клавиши и ввод. Разные
      подложки читались как разлом и дёргались при перерисовке. */
@@ -691,6 +692,10 @@
   body.kbd #s-term .kbdbar{display:flex}
   body.kbd #s-term .keypanel,
   body.kbd #s-term .quickrow{display:none}
+  /* панель клавиш свёрнута кнопкой в шапке — место уходит терминалу */
+  body.kp-off #s-term .keypanel{display:none}
+  body.kp-off #s-term .term-wrap{flex:1}
+  #kpToggle.on{color:var(--accent)}
   /* терминалу отдаём освободившееся место */
   body.kbd #s-term .term-wrap{flex:1;min-height:0}
   .kp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));
@@ -1184,6 +1189,10 @@
       <button class="wd-chip" id="wdBtn" title="Рабочая папка на сервере"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span id="wdLabel">папка</span></button>
       <div style="flex:1"></div>
       <button class="ibtn" id="termRun" title="Запустить файл"><svg viewBox="0 0 24 24" fill="currentColor" style="width:20px;height:20px"><path d="M8 5v14l11-7z"/></svg></button>
+      <!-- Свернуть нашу панель клавиш: отдаёт её место терминалу. Нужно,
+           когда программа рисует во весь экран (вход в Claude Code) и
+           десяти строк не хватает, чтобы прочитать написанное. -->
+      <button class="ibtn" id="kpToggle" title="Скрыть панель клавиш"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px"><rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 11h.01M11 11h.01M15 11h.01M8 14h8"/></svg></button>
       <button class="ibtn" id="termTheme" title="Тема и шрифт консоли"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px"><path d="M12 3a9 9 0 1 0 0 18c1 0 1.7-.8 1.7-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H16a5 5 0 0 0 5-5c0-3.9-4-7-9-7z"/><circle cx="7.5" cy="11.5" r="1"/><circle cx="12" cy="8.5" r="1"/><circle cx="16.5" cy="11.5" r="1"/></svg></button>
       <button class="ibtn" id="termMenu" title="Меню консоли"><svg viewBox="0 0 24 24" fill="currentColor" style="width:20px;height:20px"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></button>
     </div>
@@ -1199,7 +1208,11 @@
     <div class="quickrow">
       <button id="qPaste">Вставить</button>
       <button id="qClear">Очистить</button>
-      <button id="qLs">Файлы (ls)</button>
+      <button id="qLs">Файлы</button>
+      <!-- Ссылки из вывода. Главный случай — вход в Claude и Codex: они печатают
+           длинный URL, который надо открыть в браузере, а выделить его пальцем
+           в терминале практически невозможно. -->
+      <button id="qLink">Ссылка</button>
     </div>
     <!-- Компактная строка на время набора. Полная панель клавиш в этот момент
          скрыта: её место занимает клавиатура телефона, и складывать одно на
@@ -2165,11 +2178,97 @@ $('btnDebug').onclick=async()=>{
   hint('Отладчик pdb: n — шаг, c — продолжить, p x — печать x, q — выход');
 };
 // копирование вывода терминала в буфер
+/* Текст консоли целиком, с ИСТОРИЕЙ и склеенными переносами.
+
+   Длинную строку терминал разбивает на несколько экранных, помечая
+   продолжения флагом isWrapped. Раньше мы соединяли их переводом строки — и
+   всё длинное рвалось пополам. Именно поэтому ссылку для входа в Claude
+   нельзя было скопировать: она приходит одной длинной строкой, а в буфер
+   попадала разорванной. Продолжения теперь приклеиваются без разрыва. */
 function consoleText(){
-  const buf=term.buffer.active; const lines=[];
-  for(let i=0;i<buf.length;i++){const l=buf.getLine(i);if(l)lines.push(l.translateToString(true));}
-  return lines.join('\n').replace(/\n{3,}/g,'\n\n').replace(/\s+$/,'');
+  const buf=term.buffer.active; const out=[]; let cur=null;
+  for(let i=0;i<buf.length;i++){
+    const l=buf.getLine(i); if(!l)continue;
+    const s=l.translateToString(true);
+    if(l.isWrapped && cur!==null) cur+=s;      // продолжение предыдущей строки
+    else { if(cur!==null) out.push(cur); cur=s; }
+  }
+  if(cur!==null) out.push(cur);
+  return out.join('\n').replace(/\n{3,}/g,'\n\n').replace(/\s+$/,'');
 }
+
+/* Ссылки из вывода консоли. Нужны прежде всего для входа в агентов: Claude и
+   Codex печатают длинный URL, который надо открыть в браузере. Свежие —
+   в начале списка. */
+function consoleLinks(text){
+  const found=[], seen=new Set();
+  const re=/https?:\/\/[^\s"'<>`\\)\]}]+/g;
+  let m;
+  while((m=re.exec(text||''))){
+    // хвостовая пунктуация в URL почти никогда не входит
+    let u=m[0].replace(/[.,;:!?]+$/,'');
+    if(u.length<12||seen.has(u))continue;
+    seen.add(u); found.push(u);
+  }
+  return found.reverse();
+}
+/* «Ссылка»: показываем найденные в выводе URL — скопировать или открыть.
+   Без этого войти в агента с телефона практически нельзя: ссылка длинная,
+   выделять её пальцем в терминале невозможно. */
+async function copyToClipboard(text){
+  try{ await navigator.clipboard.writeText(text); return true; }catch(e){}
+  try{
+    const t=document.createElement('textarea');
+    t.value=text; t.style.position='fixed'; t.style.opacity='0';
+    document.body.appendChild(t); t.focus(); t.select();
+    const ok=document.execCommand('copy'); t.remove(); return ok;
+  }catch(e){ return false; }
+}
+function openConsoleLinks(){
+  const links=consoleLinks(consoleText());
+  if(!links.length){
+    return hint('Ссылок в выводе нет. Запустите вход — появится, и нажмите снова');
+  }
+  const acts=['Ссылки из консоли (свежие сверху)'];
+  links.slice(0,8).forEach(u=>{
+    const short=u.length>52?(u.slice(0,49)+'…'):u;
+    acts.push([short, async()=>{
+      const ok=await copyToClipboard(u);
+      hint(ok?'Ссылка скопирована — вставьте в браузер':'Скопировать не вышло');
+      // в Telegram открываем во внешнем браузере: вход внутри мини-аппа
+      // не сработает, страница авторизации туда не пускает
+      try{
+        const tg=window.Telegram&&window.Telegram.WebApp;
+        if(tg&&tg.openLink)tg.openLink(u); else window.open(u,'_blank');
+      }catch(e){}
+    }]);
+  });
+  acts.push('Иначе');
+  acts.push(['Открыть весь вывод текстом',()=>$('btnCopy').click()]);
+  showSheet('Ссылка для входа',acts);
+}
+if($('qLink'))$('qLink').onclick=openConsoleLinks;
+
+/* Свернуть/развернуть нашу панель клавиш. Освобождает почти половину экрана
+   терминалу — без этого полноэкранные программы (тот же вход в Claude Code)
+   не помещаются в десяток строк, а прокрутки у них нет по своей природе. */
+let KPHIDDEN = lsGet('cp_kphide')==='1';
+function applyKpHidden(){
+  document.body.classList.toggle('kp-off', KPHIDDEN);
+  const b=$('kpToggle');
+  if(b){
+    b.classList.toggle('on', KPHIDDEN);
+    b.title = KPHIDDEN ? 'Показать панель клавиш' : 'Скрыть панель клавиш';
+  }
+  // терминал получил другую высоту — пересчитываем строки
+  setTimeout(()=>{ try{ sendResize(); }catch(e){} }, 60);
+}
+if($('kpToggle'))$('kpToggle').onclick=()=>{
+  KPHIDDEN=!KPHIDDEN; lsSet('cp_kphide',KPHIDDEN?'1':'0'); applyKpHidden();
+  hint(KPHIDDEN?'Панель клавиш скрыта — терминалу больше места':'Панель клавиш возвращена');
+};
+applyKpHidden();
+
 $('btnCopy').onclick=()=>{
   const sel=term.getSelection();
   const text=sel||consoleText();
@@ -2228,22 +2327,34 @@ function sendResize(){ if(fit)try{fit.fit()}catch(e){}
    браузеру утянуть страницу. */
 (function(){
   const wrap=$('termWrap'); if(!wrap)return;
-  let vp=null, y0=0, top0=0, own=false;
+  let y0=0, acc=0, own=false, cell=18;
+
+  // сколько истории есть над экраном: если ничего — перехватывать нечего
+  const canScroll=()=>{
+    try{
+      const b=term.buffer.active;
+      if(b.type==='alternate')return false;     // полноэкранная программа
+      return b.length > term.rows;
+    }catch(e){ return false; }
+  };
   wrap.addEventListener('touchstart',e=>{
-    if(e.touches.length!==1){own=false;return;}
-    vp=wrap.querySelector('.xterm-viewport');
-    if(!vp){own=false;return;}
-    // прокручивать нечего (полноэкранная программа вроде Claude Code) —
-    // не перехватываем, пусть работает выделение и нажатия
-    own = vp.scrollHeight - vp.clientHeight > 4;
-    y0=e.touches[0].clientY; top0=vp.scrollTop;
+    own=false;
+    if(e.touches.length!==1)return;
+    if(!canScroll())return;
+    own=true; y0=e.touches[0].clientY; acc=0;
+    try{ const vp=wrap.querySelector('.xterm-viewport');
+         if(vp&&term.rows)cell=Math.max(8,vp.clientHeight/term.rows); }catch(e){}
   },{passive:true});
   wrap.addEventListener('touchmove',e=>{
-    if(!own||!vp||e.touches.length!==1)return;
-    const dy=y0-e.touches[0].clientY;
-    if(Math.abs(dy)<3)return;              // случайное дрожание пальца
-    vp.scrollTop=top0+dy;
-    if(e.cancelable)e.preventDefault();    // страницу не отдаём
+    if(!own||e.touches.length!==1)return;
+    const y=e.touches[0].clientY;
+    acc += (y0-y); y0=y;
+    // Двигаем историю через API самого терминала, а не прокруткой DOM:
+    // так не зависим ни от порядка слоёв, ни от того, что xterm делает с
+    // собственным контейнером.
+    const lines=Math.trunc(acc/cell);
+    if(lines){ acc-=lines*cell; try{ term.scrollLines(lines); }catch(e){} }
+    if(e.cancelable)e.preventDefault();     // страницу браузеру не отдаём
   },{passive:false});
   wrap.addEventListener('touchend',()=>{own=false;},{passive:true});
 })();
@@ -4476,27 +4587,49 @@ function sendDiag(initData){
   }catch(e){}
 }
 
+/* Оформление окна Telegram.
+
+   ВАЖНО про момент вызова. SDK грузится тегом async (иначе при недоступном
+   telegram.org страница вставала колом), поэтому к моменту запуска нашего кода
+   window.Telegram может ЕЩЁ НЕ СУЩЕСТВОВАТЬ. Тогда ни один setHeaderColor не
+   выполнялся, и шапка оставалась чёрной по умолчанию — именно это и стало
+   видно после перехода на async. Поэтому не вызываем один раз, а повторяем,
+   пока SDK не появится. */
+let _tgThemed=false;
+function applyTgTheme(){
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if(!tg || _tgThemed) return !!tg;
+  try{
+    // ready/expand тоже могли не выполниться при поздней загрузке SDK —
+    // тогда мини-апп оставался в половину экрана
+    tg.ready && tg.ready();
+    tg.expand && tg.expand();
+    tg.disableVerticalSwipes && tg.disableVerticalSwipes();
+    // hex понимают клиенты Bot API 6.9+; на старых он молча игнорируется,
+    // поэтому там просим ключевое слово темы
+    const v=parseFloat(tg.version||'0');
+    if(tg.setHeaderColor){
+      if(v>=6.9) tg.setHeaderColor('#141821'); else tg.setHeaderColor('secondary_bg_color');
+    }
+    if(tg.setBackgroundColor){
+      if(v>=6.9) tg.setBackgroundColor('#0a0c11'); else tg.setBackgroundColor('bg_color');
+    }
+    if(tg.setBottomBarColor && v>=7.10) tg.setBottomBarColor('#141821');
+    _tgThemed=true;
+  }catch(e){}
+  return true;
+}
+// повторяем, пока SDK не подъедет: он грузится асинхронно и может опоздать
+(function(){
+  let n=0;
+  const t=setInterval(()=>{ if(applyTgTheme() || ++n>40) clearInterval(t); },150);
+})();
+
 (function(){
   const tg = window.Telegram && window.Telegram.WebApp;
   if(tg){ try{
     tg.ready(); tg.expand();
-    // Шапку красим в цвет ВЕРХНЕЙ панели приложения (--bg2), а не в почти
-    // чёрный: раньше стоял #0a0c10, шапка выглядела чужой чёрной полосой над
-    // серой панелью, а на анимации клавиатуры перекрашивалась туда-обратно.
-    // Один цвет на шапку и панель — стык не виден и не мигает.
-    /* Цвет шапки. Задать его hex-строкой умеют только клиенты Bot API 6.9+;
-       более старые молча игнорируют вызов, и шапка остаётся чёрной по своей
-       теме — ровно это и происходило. Поэтому сначала пробуем точный цвет
-       нашей верхней панели, а если версия клиента ниже — просим ключевое
-       слово темы, которое понимают все. */
-    const HEAD='#141821';
-    try{
-      const v=parseFloat(tg.version||'6.0');
-      if(v>=6.9 && tg.setHeaderColor) tg.setHeaderColor(HEAD);
-      else if(tg.setHeaderColor)      tg.setHeaderColor('secondary_bg_color');
-      if(v>=6.9 && tg.setBackgroundColor) tg.setBackgroundColor('#0a0c11');
-      else if(tg.setBackgroundColor)      tg.setBackgroundColor('bg_color');
-    }catch(e){ try{ tg.setHeaderColor && tg.setHeaderColor('secondary_bg_color'); }catch(_){} }
+    applyTgTheme();
     // высоту держим сами, Telegram пусть не сворачивает окно свайпом вниз —
     // иначе жест по терминалу закрывает мини-апп
     if(tg.disableVerticalSwipes)tg.disableVerticalSwipes();
