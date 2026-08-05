@@ -1,0 +1,21 @@
+[Unit]
+Description=CodePocket Telegram bot (/start)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/codepocket.env
+ExecStart=/usr/bin/python3 /opt/codepocket/bot.py
+Restart=always
+RestartSec=5
+# боту не нужны ни root-права, ни доступ к файлам пользователей
+User=cpbot
+Group=cpbot
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=
+
+[Install]
+WantedBy=multi-user.target

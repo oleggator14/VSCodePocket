@@ -38,7 +38,7 @@ if command -v git >/dev/null && git -C "$SRC" rev-parse --git-dir >/dev/null 2>&
     say "→ версия: $(git -C "$SRC" rev-parse --short HEAD) $(git -C "$SRC" log -1 --format=%s)"
 fi
 
-FILES=(server.py agent.py static)
+FILES=(server.py agent.py bot.py static)
 if [[ $DRY_RUN -eq 1 ]]; then
     say "→ было бы скопировано в $DEPLOY_DIR:"
     printf '   %s\n' "${FILES[@]}"
@@ -56,6 +56,11 @@ done
 # 5. Перезапуск и проверка, что сервис действительно поднялся
 say "→ перезапуск $SERVICE"
 systemctl restart "$SERVICE"
+# бот — отдельный сервис; если он установлен, перезапускаем вместе с приложением
+if systemctl list-unit-files codepocket-bot.service >/dev/null 2>&1 \
+   && systemctl is-enabled codepocket-bot >/dev/null 2>&1; then
+    systemctl restart codepocket-bot || true
+fi
 sleep 2
 if systemctl is-active --quiet "$SERVICE"; then
     say "✓ готово, сервис работает"

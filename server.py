@@ -2416,6 +2416,13 @@ class Handler(BaseHTTPRequestHandler):
         p = url.path
 
         if p in ("", "/", "/index.html"):
+            # Отмечаем сам факт загрузки страницы. Нужно, чтобы отличать
+            # «приложение не работает» от «клиент показывает страницу из
+            # своего кэша и на сервер не ходит вовсе»: во втором случае
+            # записи просто не будет. Одна строка на открытие — не шумно.
+            audit("page_open", ip=self._client_ip(),
+                  ua=(self.headers.get("User-Agent") or "")[:90],
+                  q=(url.query or "")[:40])
             return self._serve_static("index.html")
         if p.startswith("/vendor/"):
             return self._serve_static(p)
