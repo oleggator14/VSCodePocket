@@ -92,7 +92,7 @@ global.XMLHttpRequest = function(){ return auto({}); };
 global.WebSocket = function(){ return auto({}); };
 global.requestAnimationFrame = () => 0;
 global.matchMedia = () => auto({matches:false});
-global.visualViewport = null;
+global.visualViewport = {height:844, offsetTop:0, addEventListener:noop};
 global.getComputedStyle = () => auto({});
 global.alert = global.confirm = global.prompt = noop;
 global.setTimeout = () => 0;                       // таймеры не запускаем

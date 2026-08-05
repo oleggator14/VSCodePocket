@@ -576,8 +576,14 @@
     min-height:40px;padding:0 var(--s2);font-size:var(--t-sm);font-weight:600;
     max-width:38%;flex-shrink:0}
   .wd-chip span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* overflow:hidden ОБЯЗАТЕЛЕН. Терминал рисует строки исходя из последнего
+     замера; когда контейнер уменьшился (открылась клавиатура, спрятались
+     панели), а замер ещё не пересчитан, лишние строки вылезали ЗА пределы
+     контейнера и рисовались поверх кнопок и поля ввода. Именно так выглядел
+     «поломанный» экран входа в Claude Code: часть вывода сверху, часть под
+     панелями. Теперь лишнее просто обрезается. */
   .term-wrap{height:36%;background:var(--term-bg);flex-shrink:0;position:relative;
-    min-height:44px}
+    min-height:44px;overflow:hidden}
   #s-term .term-wrap{flex:1;height:auto}
   #term{position:absolute;inset:0;padding:var(--s1) var(--s2)}
   /* Прокрутка терминала. Без этих правил жест внутри терминала «протекал»
@@ -2209,6 +2215,39 @@ $('pasteSend').onclick=()=>{
 };
 function sendResize(){ if(fit)try{fit.fit()}catch(e){}
   if(termWS&&termWS.readyState===1)termWS.send(JSON.stringify({t:'r',cols:term.cols,rows:term.rows})); }
+/* Прокрутка вывода пальцем.
+
+   Сам xterm.js её на тач-экранах не даёт: прокручиваемая область
+   (.xterm-viewport) лежит ПОД слоем с текстом (.xterm-screen), и все касания
+   достаются верхнему слою. Жест до прокрутки не доходил вовсе и уезжал
+   браузеру — отсюда «листается страница, а не консоль». CSS это не лечится,
+   потому что дело в порядке слоёв, а не в свойствах.
+
+   Поэтому двигаем историю сами: запоминаем начало жеста и смещаем
+   прокрутку на пройденное расстояние. preventDefault на движении не даёт
+   браузеру утянуть страницу. */
+(function(){
+  const wrap=$('termWrap'); if(!wrap)return;
+  let vp=null, y0=0, top0=0, own=false;
+  wrap.addEventListener('touchstart',e=>{
+    if(e.touches.length!==1){own=false;return;}
+    vp=wrap.querySelector('.xterm-viewport');
+    if(!vp){own=false;return;}
+    // прокручивать нечего (полноэкранная программа вроде Claude Code) —
+    // не перехватываем, пусть работает выделение и нажатия
+    own = vp.scrollHeight - vp.clientHeight > 4;
+    y0=e.touches[0].clientY; top0=vp.scrollTop;
+  },{passive:true});
+  wrap.addEventListener('touchmove',e=>{
+    if(!own||!vp||e.touches.length!==1)return;
+    const dy=y0-e.touches[0].clientY;
+    if(Math.abs(dy)<3)return;              // случайное дрожание пальца
+    vp.scrollTop=top0+dy;
+    if(e.cancelable)e.preventDefault();    // страницу не отдаём
+  },{passive:false});
+  wrap.addEventListener('touchend',()=>{own=false;},{passive:true});
+})();
+
 $('reconnectBtn').onclick=()=>connectTerm(true);
 term.onData(sendInput);
 const KEYMAP={
@@ -2949,7 +2988,20 @@ function updateKbdState(h){
   const focused = fieldFocused();
   if(!focused && h > _kbFull) _kbFull = h;      // ориентир копим без клавиатуры
   const shrunk = _kbFull > 0 && (_kbFull - h) > 120;
-  document.body.classList.toggle('kbd', focused || shrunk);
+  /* ВОТ ПРИЧИНА, ПО КОТОРОЙ КАРЕТКА ВИЛЯЛА.
+
+     Класс ставился по фокусу — то есть МГНОВЕННО, ещё до появления
+     клавиатуры. В этот момент прятались ряд действий и панель клавиш, и поле
+     ввода скачком уезжало в одну сторону. Через долю секунды приходила
+     клавиатура, высота уменьшалась, и поле плавно ехало в ДРУГУЮ сторону.
+     Два движения подряд навстречу друг другу и читались как «виляет
+     вверх-вниз» — и в консоли, и в разделе ИИ.
+
+     Теперь панели прячутся ровно тогда, когда клавиатура реально забрала
+     место. Движение одно. Фокус остаётся запасным признаком только там, где
+     нет visualViewport и высоту узнать неоткуда. */
+  const open = window.visualViewport ? shrunk : focused;
+  document.body.classList.toggle('kbd', open);
 }
 // поворот экрана меняет полную высоту — ориентир сбрасываем
 window.addEventListener('orientationchange',()=>{ _kbFull = 0; });
@@ -4432,8 +4484,19 @@ function sendDiag(initData){
     // чёрный: раньше стоял #0a0c10, шапка выглядела чужой чёрной полосой над
     // серой панелью, а на анимации клавиатуры перекрашивалась туда-обратно.
     // Один цвет на шапку и панель — стык не виден и не мигает.
-    if(tg.setHeaderColor)tg.setHeaderColor('#141821');
-    if(tg.setBackgroundColor)tg.setBackgroundColor('#0a0c11');
+    /* Цвет шапки. Задать его hex-строкой умеют только клиенты Bot API 6.9+;
+       более старые молча игнорируют вызов, и шапка остаётся чёрной по своей
+       теме — ровно это и происходило. Поэтому сначала пробуем точный цвет
+       нашей верхней панели, а если версия клиента ниже — просим ключевое
+       слово темы, которое понимают все. */
+    const HEAD='#141821';
+    try{
+      const v=parseFloat(tg.version||'6.0');
+      if(v>=6.9 && tg.setHeaderColor) tg.setHeaderColor(HEAD);
+      else if(tg.setHeaderColor)      tg.setHeaderColor('secondary_bg_color');
+      if(v>=6.9 && tg.setBackgroundColor) tg.setBackgroundColor('#0a0c11');
+      else if(tg.setBackgroundColor)      tg.setBackgroundColor('bg_color');
+    }catch(e){ try{ tg.setHeaderColor && tg.setHeaderColor('secondary_bg_color'); }catch(_){} }
     // высоту держим сами, Telegram пусть не сворачивает окно свайпом вниз —
     // иначе жест по терминалу закрывает мини-апп
     if(tg.disableVerticalSwipes)tg.disableVerticalSwipes();
