@@ -1965,6 +1965,48 @@ def parse_transcript_lines(text, with_tools=False):
     return turns
 
 
+def chat_title(turns):
+    """Короткое название беседы по её репликам.
+
+    Первую реплику брать нельзя: VS Code и расширения подмешивают в неё свою
+    служебную преамбулу — «# Context from my IDE setup: ## Active file: …».
+    В списке чатов все беседы выглядели одинаково и различались только
+    многоточием. Пропускаем служебное и берём первое, что человек написал сам.
+    """
+    junk_marks = ("context from my ide", "active file:", "<environment",
+                  "<system-reminder", "system prompt", "# instructions")
+    for t in turns:
+        if t.get("role") != "user":
+            continue
+        text = (t.get("text") or "").strip()
+        if not text:
+            continue
+        # выбрасываем markdown-заголовки, цитаты и блоки кода из преамбулы
+        lines = []
+        in_code = False
+        for ln in text.splitlines():
+            s = ln.strip()
+            if s.startswith("```"):
+                in_code = not in_code
+                continue
+            if in_code or not s:
+                continue
+            if s.startswith(("#", ">", "|", "-", "*")):
+                continue
+            if any(m in s.lower() for m in junk_marks):
+                continue
+            lines.append(s)
+        for s in lines:
+            if len(s) >= 3:
+                return s[:120]
+    # ничего человеческого не нашлось — пусть будет хоть что-то
+    for t in turns:
+        s = (t.get("text") or "").strip().splitlines()
+        if s and s[0].strip():
+            return s[0].strip()[:120]
+    return "(без названия)"
+
+
 def claude_stream_handler(user):
     """Разбирает поток событий `claude --output-format stream-json` на лету и
     складывает их в живой прогресс: что агент говорит, что запускает, что
@@ -2075,10 +2117,17 @@ REMOTE_PATH_PREP = (
     # если codex/claude всё ещё не на PATH — ищем бинарник где угодно (nvm, npm -g,
     # папки VS Code) и добавляем его каталог в PATH. Так приложение использует то,
     # что уже стоит на сервере, без переустановки.
+    # Отдельно — установка Claude Code РАСШИРЕНИЕМ VS Code: свой CLI оно кладёт
+    # в ~/.claude/local или внутрь папки расширения, и в обычном PATH его нет
+    # вовсе. Из-за этого «войти по подписке» упиралось в command not found у
+    # тех, кто работает через расширение, а не через терминал.
+    '[ -d "$HOME/.claude/local" ] && export PATH="$HOME/.claude/local:$PATH"; '
     'for _b in codex claude; do command -v "$_b" >/dev/null 2>&1 || { '
-    '_p=$(find "$HOME/.nvm" "$HOME/.local" "$HOME/.npm-global" /usr/local/lib '
-    '/usr/lib/node_modules "$HOME/.vscode-server" "$HOME/.cursor-server" '
-    '-maxdepth 7 -type f -name "$_b" 2>/dev/null | head -1); '
+    '_p=$(find "$HOME/.claude" "$HOME/.codex" "$HOME/.nvm" "$HOME/.local" '
+    '"$HOME/.npm-global" /usr/local/lib /usr/lib/node_modules '
+    '"$HOME/.vscode-server" "$HOME/.vscode-server-insiders" "$HOME/.cursor-server" '
+    '-maxdepth 9 \\( -type f -o -type l \\) -name "$_b" -perm -u+x '
+    '2>/dev/null | head -1); '
     '[ -n "$_p" ] && export PATH="$(dirname "$_p"):$PATH"; }; done; '
     # Прокси пользователя. Обычно он прописан в ~/.bashrc, а .bashrc читает только
     # ИНТЕРАКТИВНЫЙ шелл. Поэтому в терминале VS Code агент прокси видит и работает,
@@ -3530,8 +3579,7 @@ class Handler(BaseHTTPRequestHandler):
                 cnt = cur.get("count", 0) or len(tns)
                 if cnt <= 0 and not tns:
                     return
-                title = next((t["text"] for t in tns if t["role"] == "user"),
-                             tns[0]["text"] if tns else "(без названия)")
+                title = chat_title(tns)
                 chats.append({"file": cur["file"], "mtime": cur["mtime"],
                               "folder": cur.get("cwd", ""),
                               "title": (title or "(без названия)")[:120],

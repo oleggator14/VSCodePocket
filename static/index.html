@@ -2874,42 +2874,35 @@ $('pvReload').onclick=async()=>{const p=$('pvFrame').dataset.path;if(!p)return;
    (resize терминала, refresh редактора) — один раз, когда движение улеглось. */
 let _vpFrame=0, _vpSettle=0;
 
-let _vhApplied=-1, _vhTimer=0;
+let _vhApplied=-1, _vhSettle=0;
 
-/* Высоту страницы меняем ОДИН раз — когда клавиатура доехала, а не каждый кадр
-   пока она едет.
+/* ПРАВИЛО: высота приложения ВСЕГДА равна видимой части экрана. Ровно.
 
-   Раньше мы следовали за анимацией: на каждое событие вьюпорта переписывали
-   --vh, а это перекладывает весь нижний блок. Значения во время движения
-   приходят дробные и неровные, поэтому поле ввода (а с ним и каретка) ходило
-   вверх-вниз. Уменьшение числа записей помогало, но не убирало причину:
-   следовать за анимацией покадрово — и есть причина.
+   В прошлый раз я отложил запись высоты до конца анимации, надеясь убрать
+   дрожь. Это создало худшую ошибку: пока клавиатура выезжала, приложение
+   оставалось на треть экрана выше видимой области — документ становился
+   длиннее экрана, и его МОЖНО было прокрутить. iOS тут же прокручивал его,
+   чтобы показать поле ввода, мы возвращали обратно, он снова прокручивал.
+   Отсюда «страница съезжает вниз и вверх», а иногда и застревала уехавшей
+   (чёрная полоса сверху, из которой не выбраться).
 
-   Теперь запись откладывается, пока высота не перестанет меняться. Пока
-   клавиатура едет, раскладка стоит на месте и ничего не виляет; в конце
-   происходит один переход. Класс «клавиатура на экране» ставится сразу — он
-   ничего не двигает, только прячет лишние панели. */
-function commitHeight(h){
-  const hr = Math.round(h);
-  if(hr === _vhApplied) return;
-  _vhApplied = hr;
-  document.documentElement.style.setProperty('--vh',hr+'px');
-  sendResize();
-  if(cm)cm.refresh();
-}
-function scheduleHeight(h){
-  clearTimeout(_vhTimer);
-  // 110 мс тишины = движение закончилось. Меньше — снова ловим промежуточные
-  // кадры, больше — заметная задержка после закрытия клавиатуры.
-  _vhTimer = setTimeout(()=>{ _vhTimer=0; commitHeight(h); }, 110);
-}
+   Пока высота совпадает с видимой областью, прокручивать нечего — и спорить
+   не с чем. Поэтому пишем её КАЖДЫЙ кадр, без отсрочки: поле ввода едет
+   вместе с клавиатурой, плавно и в одну сторону.
 
+   Дорогое (resize терминала, пересчёт редактора) — по-прежнему один раз,
+   когда движение улеглось: на положение каретки оно не влияет. */
 function applyViewport(){
   _vpFrame=0;
   const vv=window.visualViewport;
   const h=vv?vv.height:window.innerHeight;
-  if(_vhApplied < 0) commitHeight(h);   // первый запуск — сразу
-  else scheduleHeight(h);
+  const hr=Math.round(h);
+  if(hr!==_vhApplied){
+    _vhApplied=hr;
+    document.documentElement.style.setProperty('--vh',hr+'px');
+    clearTimeout(_vhSettle);
+    _vhSettle=setTimeout(()=>{ _vhSettle=0; sendResize(); if(cm)cm.refresh(); },130);
+  }
   /* Страницу НЕ двигаем вслед за смещением вьюпорта.
 
      Раньше здесь стояло body.style.top = visualViewport.offsetTop. С открытой
@@ -2966,6 +2959,13 @@ function settleViewport(){ _vpSettle=0; }
 function fitViewport(){
   if(!_vpFrame)_vpFrame=requestAnimationFrame(applyViewport);
 }
+/* Страница не прокручивается НИКОГДА. Приложение занимает ровно экран, и любая
+   прокрутка документа — сбой: так оно уезжало вверх, оставляя чёрную полосу,
+   из которой не было выхода. Возвращаем немедленно и на всех путях. */
+function lockScroll(){ if(window.scrollY||window.scrollX)window.scrollTo(0,0); }
+window.addEventListener('scroll',lockScroll,{passive:true});
+document.addEventListener('scroll',lockScroll,{passive:true,capture:true});
+
 if(window.visualViewport){
   // passive: браузер не ждёт от нас preventDefault и не тормозит прокрутку
   window.visualViewport.addEventListener('resize',fitViewport,{passive:true});
@@ -4010,8 +4010,28 @@ async function loadServerChat(c){
 }
 $('claudeKeySave').onclick=()=>saveAiKey('claude',$('claudeKey').value.trim());
 $('codexKeySave').onclick=()=>saveAiKey('codex',$('codexKey').value.trim());
-$('claudeSub').onclick=()=>{if(!requireServer())return;$('aiLoginModal').classList.remove('on');go('term');setTimeout(()=>sendInput('claude\r'),400);hint('Консоль: следуйте ссылке для входа в Claude');};
-$('codexSub').onclick=()=>{if(!requireServer())return;$('aiLoginModal').classList.remove('on');go('term');setTimeout(()=>sendInput('codex login\r'),400);hint('Консоль: следуйте ссылке для входа в ChatGPT');};
+/* Команда входа сама ищет бинарник агента.
+
+   Раньше в терминал набиралось просто «claude». У тех, кто ставил Claude Code
+   РАСШИРЕНИЕМ VS Code, своего claude в PATH нет вовсе: расширение кладёт его
+   в ~/.claude/local или внутрь папки расширения. Получалось «command not
+   found» и тупик — войти по подписке было нечем. */
+function agentCmd(bin, args){
+  const dirs = '"$HOME/.claude" "$HOME/.codex" "$HOME/.vscode-server" '
+             + '"$HOME/.vscode-server-insiders" "$HOME/.cursor-server" "$HOME/.nvm" '
+             + '"$HOME/.local" "$HOME/.npm-global" /usr/local/lib /usr/lib/node_modules';
+  return 'A=$(command -v ' + bin + ' 2>/dev/null); '
+       + '[ -z "$A" ] && [ -x "$HOME/.claude/local/' + bin + '" ] && A="$HOME/.claude/local/' + bin + '"; '
+       + '[ -z "$A" ] && A=$(find ' + dirs + ' -maxdepth 9 \\( -type f -o -type l \\) '
+       + '-name ' + bin + ' -perm -u+x 2>/dev/null | head -1); '
+       // Явное ветвление, а не «&& … || …»: во второй форме сообщение об
+       // отсутствии печаталось и тогда, когда агент нашёлся и просто вышел
+       // с ненулевым кодом.
+       + 'if [ -n "$A" ]; then "$A"' + (args ? ' ' + args : '')
+       + '; else echo "' + bin + ' не найден — нажмите «Установить» в разделе ИИ"; fi';
+}
+$('claudeSub').onclick=()=>{if(!requireServer())return;$('aiLoginModal').classList.remove('on');go('term');setTimeout(()=>sendInput(agentCmd('claude','')+'\r'),400);hint('Консоль: следуйте ссылке для входа в Claude');};
+$('codexSub').onclick=()=>{if(!requireServer())return;$('aiLoginModal').classList.remove('on');go('term');setTimeout(()=>sendInput(agentCmd('codex','login')+'\r'),400);hint('Консоль: следуйте ссылке для входа в ChatGPT');};
 
 /* ═══ Remote Explorer ═══ */
 let REX_OPEN=false;
