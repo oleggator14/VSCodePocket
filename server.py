@@ -2782,6 +2782,27 @@ class Handler(BaseHTTPRequestHandler):
         if not self._origin_ok():
             return self._err("запрос с чужого источника", 403)
 
+        if p == "/api/diag":
+            # Маячок с клиента: что именно видит страница в момент запуска.
+            # Нужен, потому что «форма вместо входа» может значить и «SDK не
+            # загрузился», и «Telegram не передал данные» — снаружи это
+            # неразличимо. Содержимое initData НЕ принимаем, только признаки.
+            if not rate_ok("diag:" + self._client_ip(), 30, 600):
+                return self._json({"ok": True})
+            try:
+                d = json.loads(self._body() or b"{}")
+            except (ValueError, json.JSONDecodeError):
+                d = {}
+            audit("client_diag", ip=self._client_ip(),
+                  ua=(self.headers.get("User-Agent") or "")[:70],
+                  sdk=bool(d.get("sdk")), sdk_init_len=int(d.get("sdkInitLen") or 0),
+                  hash_len=int(d.get("hashLen") or 0),
+                  hash_tg=bool(d.get("hashTg")), stored=bool(d.get("stored")),
+                  platform=str(d.get("platform") or "")[:20],
+                  ver=str(d.get("ver") or "")[:12],
+                  search=str(d.get("search") or "")[:40])
+            return self._json({"ok": True})
+
         if p == "/api/register":
             return self._register()
         if p == "/api/login":

@@ -3991,11 +3991,42 @@ function inTelegram(){
   }catch(e){ return false; }
 }
 
+/* Маячок: сообщаем серверу, что именно видит страница при запуске.
+   Само содержимое данных входа не отправляем — только признаки, по которым
+   различаются «SDK не загрузился» и «Telegram не передал данные». */
+function sendDiag(initData){
+  try{
+    const w=window.Telegram&&window.Telegram.WebApp;
+    let stored=false; try{stored=!!sessionStorage.getItem('cp_tg_init');}catch(_){}
+    api('api/diag',{method:'POST',body:JSON.stringify({
+      sdk:!!w, sdkInitLen:(w&&w.initData?w.initData.length:0),
+      hashLen:(location.hash||'').length,
+      hashTg:(location.hash||'').indexOf('tgWebApp')>=0,
+      stored:stored, platform:(w&&w.platform)||'',
+      ver:(w&&w.version)||'', search:(location.search||'')
+    })}).catch(()=>{});
+  }catch(e){}
+}
+
 (function(){
   const tg = window.Telegram && window.Telegram.WebApp;
   if(tg){ try{ tg.ready(); tg.expand(); if(tg.setHeaderColor)tg.setHeaderColor('#0a0c10'); if(tg.setBackgroundColor)tg.setBackgroundColor('#0a0c10'); }catch(e){} }
   const initData = tgInitData();
   const inTg = initData.length>10;
+  sendDiag(initData);
+  // SDK грузится async и может подъехать позже — тогда пробуем войти ещё раз
+  if(!inTg){
+    let tries=0;
+    const t=setInterval(()=>{
+      tries++;
+      const late=tgInitData();
+      if(late.length>10){
+        clearInterval(t); sendDiag(late);
+        api('api/tg-login',{method:'POST',body:JSON.stringify({initData:late})})
+          .then(()=>location.reload()).catch(()=>{});
+      }else if(tries>=10){ clearInterval(t); sendDiag(late); }
+    },400);
+  }
   if(inTg){
     // В Telegram форму регистрации не показываем вообще, пока вход не отказал:
     // экран входа виден по умолчанию, и на время запроса человек успевал
