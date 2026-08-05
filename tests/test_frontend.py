@@ -165,5 +165,75 @@ class FrontendBoots(unittest.TestCase):
         self.assertIn("TARGET", lets, "не нашли объявление TARGET — тест устарел")
 
 
+
+@unittest.skipUnless(node_available(), "нет node — проверка пропущена")
+class KeyboardState(unittest.TestCase):
+    """Признак «клавиатура на экране» ломался трижды, поэтому проверяем его
+    отдельно и в обеих средах:
+
+      Safari:   window.innerHeight остаётся полной, просаживается только
+                visualViewport.height;
+      Telegram: window.innerHeight просаживается ВМЕСТЕ с ней — сравнение с
+                innerHeight даёт ноль, и класс не ставится вовсе. Именно так
+                панель клавиш оставалась на экране и наезжала на нижнее меню.
+    """
+
+    def _run(self, script):
+        code = inline_script()[0]
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "kbd.js")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(STUB)
+                f.write("\nvar CLS=new Set();\n")
+                f.write("document.body.classList={add:c=>CLS.add(c),"
+                        "remove:c=>CLS.delete(c),contains:c=>CLS.has(c),"
+                        "toggle:(c,on)=>{on?CLS.add(c):CLS.delete(c);}};\n")
+                f.write("try{\n" + code + "\n}catch(e){"
+                        "console.error('THREW:'+e.message);process.exit(3);}\n")
+                f.write(script)
+            return subprocess.run(["node", path], capture_output=True,
+                                  text=True, timeout=60)
+
+    def test_safari_like(self):
+        # полный экран 800, клавиатура забирает 300 -> видимая часть 500
+        r = self._run(
+            "global.innerHeight=800;\n"
+            "updateKbdState(800); console.log('idle:'+CLS.has('kbd'));\n"
+            "updateKbdState(500); console.log('open:'+CLS.has('kbd'));\n"
+            "updateKbdState(800); console.log('closed:'+CLS.has('kbd'));\n")
+        self.assertEqual(r.returncode, 0, r.stderr[-400:])
+        self.assertIn("idle:false", r.stdout)
+        self.assertIn("open:true", r.stdout)
+        self.assertIn("closed:false", r.stdout)
+
+    def test_telegram_like_innerheight_also_shrinks(self):
+        # тут innerHeight просаживается вместе с видимой высотой
+        r = self._run(
+            "global.innerHeight=800;\n"
+            "updateKbdState(800); console.log('idle:'+CLS.has('kbd'));\n"
+            "global.innerHeight=500;\n"
+            "updateKbdState(500); console.log('open:'+CLS.has('kbd'));\n"
+            "global.innerHeight=800;\n"
+            "updateKbdState(800); console.log('closed:'+CLS.has('kbd'));\n")
+        self.assertEqual(r.returncode, 0, r.stderr[-400:])
+        self.assertIn("idle:false", r.stdout)
+        self.assertIn("open:true", r.stdout,
+                      "класс не поставился — ровно тот сбой, что был в Telegram")
+        self.assertIn("closed:false", r.stdout)
+
+    def test_stays_open_while_keyboard_slides_away(self):
+        # фокус уже ушёл, но место ещё занято: панель не должна вернуться
+        r = self._run(
+            "global.innerHeight=800;\n"
+            "updateKbdState(800);\n"
+            "updateKbdState(500);\n"
+            "updateKbdState(560); console.log('mid:'+CLS.has('kbd'));\n"
+            "updateKbdState(800); console.log('done:'+CLS.has('kbd'));\n")
+        self.assertEqual(r.returncode, 0, r.stderr[-400:])
+        self.assertIn("mid:true", r.stdout,
+                      "класс снялся, пока клавиатура ещё уезжала")
+        self.assertIn("done:false", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

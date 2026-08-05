@@ -606,10 +606,19 @@
   /* Безопасную зону снизу добавляет ТОЛЬКО таббар — он лежит ниже всех.
      Раньше её добавляла и панель клавиш, и получалась пустая полоса
      в палец высотой между последним рядом кнопок и нижним меню. */
+  /* Панель клавиш ОБЯЗАНА уступать место: раньше у неё стоял flex-shrink:0,
+     и когда высоты не хватало, она выдавливала нижнее меню наружу — панель и
+     меню оказывались нарисованы друг на друге. Теперь при нехватке места она
+     сжимается и прокручивается, а меню остаётся на своём месте всегда. */
   .keypanel{background:var(--bg2);border-top:1px solid var(--border);
-    padding:var(--s2);flex-shrink:0}
+    padding:var(--s2);flex-shrink:1;min-height:0;overflow:auto;
+    overscroll-behavior:contain}
   /* когда таббара нет (набор команды) — зону добавляет панель */
   body.kbd .keypanel{padding-bottom:calc(var(--s2) + env(safe-area-inset-bottom))}
+  /* нижнее меню не сжимается и не уезжает ни при каких обстоятельствах */
+  .tabbar{flex-shrink:0;z-index:6}
+  /* терминалу всегда оставляем читаемый кусок */
+  #s-term .term-wrap{min-height:120px}
 
   /* ── Набор команды: клавиатура телефона занимает низ экрана ──────────────
      Пока она открыта, наша панель клавиш и ряд быстрых действий прячутся —
@@ -2118,12 +2127,26 @@ document.querySelectorAll('.key[data-k]').forEach(k=>k.addEventListener('click',
 // Явный выход из набора: убрать фокус — клавиатура телефона уедет сама.
 // Раньше выхода не было вовсе: закрыть её можно было только системным жестом,
 // а на экране в этот момент не оставалось ничего, что подсказывало бы как.
-if($('kbdHide'))$('kbdHide').addEventListener('mousedown',e=>e.preventDefault());
-if($('kbdHide'))$('kbdHide').addEventListener('click',e=>{
-  e.preventDefault();
+function dismissKeyboard(){
   const a=document.activeElement; if(a&&a.blur)a.blur();
-  document.body.classList.remove('kbd');
-});
+  // класс снимет updateKbdState, когда место реально освободится
+}
+if($('kbdHide')){
+  // mousedown гасим, иначе поле теряет фокус до того, как сработает click
+  $('kbdHide').addEventListener('mousedown',e=>e.preventDefault());
+  $('kbdHide').addEventListener('click',e=>{e.preventDefault();dismissKeyboard();});
+}
+// Второй выход, всегда доступный: свайп вниз по строке быстрых действий.
+// Кнопку можно не заметить, а жест «смахнуть вниз» для клавиатуры привычен.
+(function(){
+  const row=document.querySelector('#s-term .quickrow'); if(!row)return;
+  let y0=null;
+  row.addEventListener('touchstart',e=>{y0=e.touches[0].clientY;},{passive:true});
+  row.addEventListener('touchmove',e=>{
+    if(y0!==null && e.touches[0].clientY-y0>40){ y0=null; dismissKeyboard(); }
+  },{passive:true});
+  row.addEventListener('touchend',()=>{y0=null;},{passive:true});
+})();
 $('ctrlKey').onclick=e=>{e.preventDefault();ctrlArmed=!ctrlArmed;altArmed=false;$('altKey').classList.remove('on');$('ctrlKey').classList.toggle('on',ctrlArmed);};
 $('altKey').onclick=e=>{e.preventDefault();altArmed=!altArmed;ctrlArmed=false;$('ctrlKey').classList.remove('on');$('altKey').classList.toggle('on',altArmed);};
 $('pasteKey').onclick=e=>{e.preventDefault();$('btnPaste').click();};
@@ -2752,15 +2775,35 @@ function applyViewport(){
   // прижимаем body ровно к видимой области (учитывая сдвиг под клавиатурой)
   document.body.style.top=top+'px';
   if(window.scrollY||window.scrollX)window.scrollTo(0,0);
-  // Признак «клавиатура на экране» берём из РЕАЛЬНОЙ высоты, а не из фокуса.
-  // Фокус приходит мгновенно, а клавиатура уезжает ещё треть секунды: класс
-  // снимался раньше времени, панель клавиш возвращалась в ещё сжатый экран и
-  // налезала на нижнее меню — то самое, что видно на скриншоте закрытия.
-  if(vv){
-    const open = (window.innerHeight - h) > 120;
-    document.body.classList.toggle('kbd', open);
-  }
+  updateKbdState(h);
 }
+
+/* Признак «клавиатура на экране».
+
+   Сравнивать с window.innerHeight нельзя: в обёртке Telegram она уменьшается
+   ВМЕСТЕ с клавиатурой, разница выходит нулевая, класс не ставился — и панель
+   клавиш оставалась на экране вместе с нижним меню, наезжая на него.
+
+   Поэтому держим свой ориентир: самую большую высоту, которую видели, пока ни
+   одно поле не в фокусе. Это и есть экран без клавиатуры.
+
+   Условие двойное. Фокус — чтобы панель убралась сразу, не дожидаясь анимации.
+   Просевшая высота — чтобы она не вернулась раньше, чем клавиатура уехала:
+   после blur фокуса уже нет, а место ещё занято. */
+let _kbFull = 0;
+function fieldFocused(){
+  const a = document.activeElement;
+  return !!a && /^(INPUT|TEXTAREA)$/.test(a.tagName) &&
+         a.type !== 'checkbox' && a.type !== 'radio' && a.type !== 'file';
+}
+function updateKbdState(h){
+  const focused = fieldFocused();
+  if(!focused && h > _kbFull) _kbFull = h;      // ориентир копим без клавиатуры
+  const shrunk = _kbFull > 0 && (_kbFull - h) > 120;
+  document.body.classList.toggle('kbd', focused || shrunk);
+}
+// поворот экрана меняет полную высоту — ориентир сбрасываем
+window.addEventListener('orientationchange',()=>{ _kbFull = 0; });
 function settleViewport(){
   _vpSettle=0;
   sendResize();
@@ -2793,9 +2836,9 @@ applyViewport(); settleViewport();
   let scrollTimer=0;
   document.addEventListener('focusin',e=>{
     if(!isField(e.target))return;
-    // класс ставит applyViewport по реальной высоте; здесь только на случай
-    // браузеров без visualViewport
-    if(!window.visualViewport)document.body.classList.add('kbd');
+    // ставим сразу, не дожидаясь событий вьюпорта: панель клавиш должна уйти
+    // в тот же кадр, иначе она успевает наложиться на нижнее меню
+    document.body.classList.add('kbd');
     // Раскладку не трогаем руками: visualViewport сам шлёт события всю
     // анимацию, а fitViewport сведёт их в один кадр. Раньше здесь стояли три
     // таймера на 60/220/450 мс — они дёргали пересчёт поверх этих событий и
@@ -2813,10 +2856,16 @@ applyViewport(); settleViewport();
   document.addEventListener('focusout',e=>{
     if(!isField(e.target))return;
     clearTimeout(scrollTimer);
-    if(!window.visualViewport)setTimeout(()=>{
-      // класс снимаем, только если фокус не ушёл в соседнее поле
+    // Снимаем не сразу: клавиатура ещё уезжает, место не освободилось.
+    // Ждём, пока высота вернётся, но не дольше секунды — на случай, если
+    // событий вьюпорта не будет вовсе.
+    setTimeout(()=>{
+      const vv=window.visualViewport;
+      updateKbdState(vv?vv.height:window.innerHeight);
+    },100);
+    setTimeout(()=>{
       if(!isField(document.activeElement))document.body.classList.remove('kbd');
-    },80);
+    },1000);
   },true);
 })();
 
