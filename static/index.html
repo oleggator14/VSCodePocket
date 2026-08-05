@@ -588,6 +588,29 @@
   #s-term .keysrow .key{min-width:50px;height:46px}
   .keypanel{background:var(--bg2);border-top:1px solid var(--border);
     padding:var(--s2) var(--s2) calc(var(--s2) + env(safe-area-inset-bottom));flex-shrink:0}
+
+  /* ── Набор команды: клавиатура телефона занимает низ экрана ──────────────
+     Пока она открыта, наша панель клавиш и ряд быстрых действий прячутся —
+     иначе они складываются с системной клавиатурой, терминал сжимается до
+     пары строк, и непонятно, как из этого выйти. Вместо них одна компактная
+     строка вплотную над полем ввода. */
+  .kbdbar{display:none;gap:var(--s2);align-items:center;
+    padding:var(--s2) var(--s3);background:var(--bg);
+    border-top:1px solid var(--border);overflow-x:auto;flex-shrink:0;
+    scrollbar-width:none}
+  .kbdbar::-webkit-scrollbar{display:none}
+  .kbdbar .key{flex:0 0 auto;min-width:46px;height:40px;font-size:var(--t-sm)}
+  .kbd-hide{flex:0 0 auto;margin-left:auto;position:sticky;right:0;
+    width:44px;height:40px;border-radius:var(--r-sm);
+    background:var(--bg3);color:var(--fg);display:flex;
+    align-items:center;justify-content:center}
+  .kbd-hide svg{width:20px;height:20px}
+  .kbd-hide:active{background:var(--accent-soft);color:var(--accent)}
+  body.kbd #s-term .kbdbar{display:flex}
+  body.kbd #s-term .keypanel,
+  body.kbd #s-term .quickrow{display:none}
+  /* терминалу отдаём освободившееся место */
+  body.kbd #s-term .term-wrap{flex:1;min-height:0}
   .kp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));
     gap:var(--s1);max-height:calc(var(--vh,100vh) * 0.34);overflow:auto}
   .kp-grid .key{height:44px;padding:0}
@@ -1051,6 +1074,20 @@
       <button id="qPaste">Вставить</button>
       <button id="qClear">Очистить</button>
       <button id="qLs">Файлы (ls)</button>
+    </div>
+    <!-- Компактная строка на время набора. Полная панель клавиш в этот момент
+         скрыта: её место занимает клавиатура телефона, и складывать одно на
+         другое незачем — терминалу тогда остаётся две строки. Здесь только то,
+         без чего в терминале не обойтись, и явный выход из набора. -->
+    <div class="kbdbar" id="kbdBar">
+      <button class="key" data-k="esc">esc</button>
+      <button class="key" data-k="tab">tab</button>
+      <button class="key" data-k="cc">^C</button>
+      <button class="key" data-k="up">▲</button>
+      <button class="key" data-k="down">▼</button>
+      <button class="key" data-k="left">◄</button>
+      <button class="key" data-k="right">►</button>
+      <button class="kbd-hide" id="kbdHide" title="Скрыть клавиатуру"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
     </div>
     <div class="cmdbar" id="cmdBar">
       <input id="cmdInput" placeholder="Команда…" autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false" inputmode="text" enterkeyhint="send">
@@ -2021,6 +2058,16 @@ const KEYMAP={
 };
 // вспомогательные клавиши НЕ форсируют фокус — иначе телефон открывает клавиатуру
 document.querySelectorAll('.key[data-k]').forEach(k=>k.addEventListener('click',e=>{e.preventDefault();sendInput(KEYMAP[k.dataset.k]||'');}));
+// Явный выход из набора: убрать фокус — клавиатура телефона уедет сама.
+// Раньше выхода не было вовсе: закрыть её можно было только системным жестом,
+// а на экране в этот момент не оставалось ничего, что подсказывало бы как.
+if($('kbdHide'))$('kbdHide').addEventListener('mousedown',e=>e.preventDefault());
+if($('kbdHide'))$('kbdHide').addEventListener('click',e=>{
+  e.preventDefault();
+  const a=document.activeElement; if(a&&a.blur)a.blur();
+  document.body.classList.remove('kbd');
+  setTimeout(fitViewport,60); setTimeout(fitViewport,300);
+});
 $('ctrlKey').onclick=e=>{e.preventDefault();ctrlArmed=!ctrlArmed;altArmed=false;$('altKey').classList.remove('on');$('ctrlKey').classList.toggle('on',ctrlArmed);};
 $('altKey').onclick=e=>{e.preventDefault();altArmed=!altArmed;ctrlArmed=false;$('ctrlKey').classList.remove('on');$('altKey').classList.toggle('on',altArmed);};
 $('pasteKey').onclick=e=>{e.preventDefault();$('btnPaste').click();};
