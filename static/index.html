@@ -2,7 +2,11 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<!-- interactive-widget: где поддерживается (Chrome, а значит Telegram на
+     Android), браузер сам ужимает страницу под клавиатуру. Тогда нам не надо
+     пересчитывать высоту покадрово из JS — а именно этот пересчёт и заставляет
+     каретку в поле дрожать, а фон под кнопками перерисовываться рывками. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>CodePocket</title>
@@ -368,6 +372,20 @@
   .ht-l b{color:var(--fg);font-weight:600}
 
   /* ── 6. Экран «Проекты» ─────────────────────────────────────────────── */
+  /* выбор языков для своего набора проекта */
+  .langpick{margin:0 var(--s4) var(--s3);padding:var(--s3);border-radius:var(--r);
+    background:var(--bg2);display:flex;flex-direction:column;gap:var(--s2)}
+  .lp-head{font-size:var(--t-xs);text-transform:uppercase;letter-spacing:.06em;
+    font-weight:700;color:var(--dim-2)}
+  .lp-chips{display:flex;flex-wrap:wrap;gap:var(--s2)}
+  .lp-chip{padding:0 var(--s3);min-height:38px;border-radius:var(--r-pill);
+    background:var(--bg3);border:1px solid var(--border);color:var(--fg);
+    font-size:var(--t-sm);font-weight:600;display:inline-flex;align-items:center;
+    cursor:pointer}
+  .lp-chip.on{background:var(--accent);border-color:var(--accent);
+    color:var(--on-accent)}
+  .lp-sum{font-size:var(--t-sm);color:var(--dim);font-family:var(--mono);
+    word-break:break-all}
   .newrow{display:flex;gap:var(--s2);margin:var(--s1) var(--s4) var(--s3)}
   .newrow input{flex:1}
   .newrow select{flex:0 0 auto;max-width:38%}
@@ -586,8 +604,13 @@
   .noserv button{min-height:var(--tap);padding:0 var(--s5);border-radius:var(--r);
     background:var(--accent);color:var(--on-accent);font-size:var(--t-md);font-weight:600}
   /* нижний отступ был нулевой — кнопки упирались в коробку ввода */
+  /* Ряд действий рисует ВЕРХНЮЮ границу нижнего блока. Раньше здесь сходились
+     край терминала, своя рамка и своя подложка — при смене высоты этот стык
+     перерисовывался рывками, и это было заметнее всего именно тут.
+     contain ограничивает перерисовку самим блоком, а не всей страницей. */
   .quickrow{display:flex;gap:var(--s2);padding:var(--s3) var(--s3) var(--s2);
-    background:var(--bg2);border-top:1px solid var(--border)}
+    background:var(--bg2);border-top:1px solid var(--border);
+    contain:layout paint}
   .quickrow button{flex:1;min-height:var(--tap);border-radius:var(--r-sm);
     background:var(--bg3);border:1px solid var(--border);color:var(--fg);
     font-size:var(--t-md);font-weight:600}
@@ -595,7 +618,10 @@
   /* низ консоли — одна поверхность: ряд действий, клавиши и ввод. Разные
      подложки читались как разлом и дёргались при перерисовке. */
   .cmdbar{display:flex;gap:var(--s2);padding:var(--s2) var(--s3) var(--s3);
-    background:var(--bg2);flex-shrink:0}
+    background:var(--bg2);flex-shrink:0;contain:layout paint}
+  /* Каретка не должна прыгать при пересчёте высоты: поле держит свой размер
+     само и не участвует в общей переукладке. */
+  .cmdbar input{contain:layout;will-change:auto}
   .cmdbar input{flex:1;min-height:var(--tap);font-family:var(--mono);border-radius:var(--r)}
   .cmdbar button{flex:0 0 auto;min-width:52px;border-radius:var(--r);
     background:var(--accent);color:var(--on-accent);font-size:var(--t-xl);font-weight:700}
@@ -1067,8 +1093,17 @@
         <option value="bash">Bash-скрипт</option>
         <option value="cpp">C++</option>
         <option value="empty">Пустой</option>
+        <option value="__custom">Свой набор языков…</option>
       </select>
       <button id="npGo">+</button>
+    </div>
+    <!-- Свой набор: готовые шаблоны покрывают частые случаи, но сочетаний
+         больше, чем можно перечислить списком. Отмечаете языки — на каждый
+         кладётся рабочая заготовка. -->
+    <div class="langpick hidden" id="langPick">
+      <div class="lp-head">Отметьте языки — на каждый добавим файл</div>
+      <div class="lp-chips" id="lpChips"></div>
+      <div class="lp-sum" id="lpSum">Ничего не выбрано</div>
     </div>
     <div class="plist" id="plist"></div>
   </div>
@@ -1791,6 +1826,8 @@ async function loadProjects(){
   try{
     const r=await api('api/projects');
     ALLPROJ=r.projects.map(p=>p.name); fillProjSelects();
+    if(r.langs)renderLangChips(r.langs);   // список языков ведёт сервер
+    syncLangPick();
     if($('homeProjects')&&!$('homeProjects').classList.contains('hidden'))renderHomeProjects();
     const box=$('plist'); box.innerHTML='';
     if(!r.projects.length){
@@ -1830,11 +1867,45 @@ async function loadProjects(){
     });
   }catch(e){hint('Проекты: '+e.message);}
 }
+/* Свой набор языков: чипсы строятся из списка, который отдаёт сервер, —
+   добавить язык на бэкенде достаточно в одном месте. */
+const LANGSEL=new Set();
+function renderLangChips(list){
+  const box=$('lpChips'); if(!box||!list||!list.length)return;
+  box.innerHTML='';
+  list.forEach(l=>{
+    const b=document.createElement('button');
+    b.className='lp-chip'+(LANGSEL.has(l.id)?' on':'');
+    b.textContent=l.name; b.title=l.file;
+    b.onclick=()=>{
+      LANGSEL.has(l.id)?LANGSEL.delete(l.id):LANGSEL.add(l.id);
+      b.classList.toggle('on',LANGSEL.has(l.id));
+      updateLangSum(list);
+    };
+    box.appendChild(b);
+  });
+  updateLangSum(list);
+}
+function updateLangSum(list){
+  const el=$('lpSum'); if(!el)return;
+  const files=list.filter(l=>LANGSEL.has(l.id)).map(l=>l.file);
+  el.textContent=files.length?files.join('  ·  '):'Ничего не выбрано';
+}
+function syncLangPick(){
+  const box=$('langPick'); if(!box)return;
+  box.classList.toggle('hidden',$('npTpl').value!=='__custom');
+}
+if($('npTpl'))$('npTpl').addEventListener('change',syncLangPick);
+
 $('npGo').onclick=async()=>{
   const name=$('npName').value.trim();
   if(!name){hint('Введите имя проекта');return;}
+  const tpl=$('npTpl').value;
+  const custom = tpl==='__custom';
+  if(custom && !LANGSEL.size){hint('Отметьте хотя бы один язык');return;}
   try{
-    await api('api/projects',{method:'POST',body:JSON.stringify({name,template:$('npTpl').value})});
+    const body = custom ? {name, langs:[...LANGSEL]} : {name, template:tpl};
+    await api('api/projects',{method:'POST',body:JSON.stringify(body)});
     $('npName').value='';
     await loadProjects();
     selectProject(name);
@@ -2781,11 +2852,20 @@ $('pvReload').onclick=async()=>{const p=$('pvFrame').dataset.path;if(!p)return;
    (resize терминала, refresh редактора) — один раз, когда движение улеглось. */
 let _vpFrame=0, _vpSettle=0;
 
+let _vhApplied=-1;
 function applyViewport(){
   _vpFrame=0;
   const vv=window.visualViewport;
   const h=vv?vv.height:window.innerHeight;
-  document.documentElement.style.setProperty('--vh',h+'px');
+  // Пишем высоту, только когда она реально изменилась больше чем на пиксель.
+  // Каждая запись --vh перекладывает весь нижний блок; на дробных значениях
+  // во время анимации это происходило по нескольку раз на кадр — отсюда и
+  // дрожь каретки, и рваная перерисовка фона под кнопками.
+  const hr = Math.round(h);
+  if(hr !== _vhApplied){
+    _vhApplied = hr;
+    document.documentElement.style.setProperty('--vh',hr+'px');
+  }
   /* Страницу НЕ двигаем вслед за смещением вьюпорта.
 
      Раньше здесь стояло body.style.top = visualViewport.offsetTop. С открытой

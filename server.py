@@ -172,6 +172,78 @@ TEMPLATES = {
     },
     "empty": {},
 }
+
+# ── Свой набор языков ────────────────────────────────────────────────────────
+# Готовые шаблоны покрывают частые случаи, но не все: языков больше, а
+# сочетания у каждого свои. Здесь по одной рабочей заготовке на язык — проект
+# собирается из отмеченных, в любом сочетании.
+LANG_FILES = {
+    "python":  ("Python",       "main.py",
+                '#!/usr/bin/env python3\n\n\ndef main():\n'
+                '    print("Привет из Python!")\n\n\n'
+                'if __name__ == "__main__":\n    main()\n'),
+    "js":      ("JavaScript",   "app.js",
+                'console.log("Привет из JavaScript!");\n'),
+    "ts":      ("TypeScript",   "app.ts",
+                'const who: string = "TypeScript";\n'
+                'console.log(`Привет из ${who}!`);\n'),
+    "html":    ("HTML",         "index.html",
+                '<!DOCTYPE html>\n<html lang="ru">\n<head>\n<meta charset="utf-8">\n'
+                '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+                '<title>Страница</title>\n<link rel="stylesheet" href="style.css">\n'
+                '</head>\n<body>\n<h1>Привет!</h1>\n'
+                '<script src="app.js"></script>\n</body>\n</html>\n'),
+    "css":     ("CSS",          "style.css",
+                'body{font-family:system-ui,sans-serif;margin:40px;line-height:1.5}\n'
+                'h1{letter-spacing:-.02em}\n'),
+    "node":    ("Node.js",      "server.js",
+                'const http = require("http");\n\n'
+                'http.createServer((req, res) => {\n'
+                '  res.writeHead(200, {"Content-Type": "text/plain; charset=utf-8"});\n'
+                '  res.end("Привет из Node!\\n");\n'
+                '}).listen(3000, () => console.log("http://localhost:3000"));\n'),
+    "go":      ("Go",           "main.go",
+                'package main\n\nimport "fmt"\n\n'
+                'func main() {\n\tfmt.Println("Привет из Go!")\n}\n'),
+    "rust":    ("Rust",         "main.rs",
+                'fn main() {\n    println!("Привет из Rust!");\n}\n'),
+    "cpp":     ("C++",          "main.cpp",
+                '#include <iostream>\n\nint main() {\n'
+                '    std::cout << "Привет из C++!" << std::endl;\n    return 0;\n}\n'),
+    "c":       ("C",            "main.c",
+                '#include <stdio.h>\n\nint main(void) {\n'
+                '    printf("Привет из C!\\n");\n    return 0;\n}\n'),
+    "java":    ("Java",         "Main.java",
+                'public class Main {\n    public static void main(String[] args) {\n'
+                '        System.out.println("Привет из Java!");\n    }\n}\n'),
+    "php":     ("PHP",          "index.php",
+                '<?php\necho "Привет из PHP!\\n";\n'),
+    "ruby":    ("Ruby",         "main.rb",
+                'puts "Привет из Ruby!"\n'),
+    "bash":    ("Bash",         "run.sh",
+                '#!/usr/bin/env bash\nset -euo pipefail\n\necho "Привет из bash!"\n'),
+    "sql":     ("SQL",          "schema.sql",
+                'CREATE TABLE items (\n  id    INTEGER PRIMARY KEY,\n'
+                '  name  TEXT NOT NULL,\n  price REAL\n);\n\n'
+                'INSERT INTO items (name, price) VALUES (\'Пример\', 9.99);\n'),
+    "docker":  ("Dockerfile",   "Dockerfile",
+                'FROM python:3.12-slim\nWORKDIR /app\nCOPY . .\n'
+                'CMD ["python", "main.py"]\n'),
+    "md":      ("README",       "README.md",
+                '# Проект\n\nОписание.\n\n## Запуск\n\n```bash\n# команда запуска\n```\n'),
+}
+
+
+def build_custom_template(langs):
+    """Собирает набор файлов из выбранных языков. Неизвестное молча пропускаем,
+    порядок не важен: каждый язык даёт ровно один файл."""
+    files = {}
+    for key in langs:
+        item = LANG_FILES.get(str(key).strip().lower())
+        if item:
+            _, fname, content = item
+            files[fname] = content
+    return files
 _agent_busy = set()       # пользователи, у которых агент сейчас работает
 _agent_busy_lock = threading.Lock()
 
@@ -2565,7 +2637,9 @@ class Handler(BaseHTTPRequestHandler):
                                   "mtime": int(os.path.getmtime(full))})
             items.sort(key=lambda x: -x["mtime"])
             return self._json({"projects": items,
-                               "templates": list(TEMPLATES.keys())})
+                               "templates": list(TEMPLATES.keys()),
+                               "langs": [{"id": k, "name": v[0], "file": v[1]}
+                                         for k, v in LANG_FILES.items()]})
 
         if p == "/api/usage":
             with _lock:
@@ -3791,7 +3865,15 @@ class Handler(BaseHTTPRequestHandler):
             template = data.get("template") or "python"
             if not PROJECT_RE.match(name):
                 return self._err("имя проекта: латиница/цифры/дефис, до 31 символа")
-            if template not in TEMPLATES:
+            # Свой набор языков: пришёл список — собираем шаблон из него.
+            langs = data.get("langs")
+            if isinstance(langs, list) and langs:
+                files = build_custom_template(langs[:20])
+                if not files:
+                    return self._err("выберите хотя бы один язык")
+            elif template in TEMPLATES:
+                files = TEMPLATES[template]
+            else:
                 return self._err("неизвестный шаблон")
             d = ensure_projects_dir(user)
             proj = os.path.join(d, name)
@@ -3799,7 +3881,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._err("проект с таким именем уже есть", 409)
             os.makedirs(proj)
             os.chown(proj, uid, gid)
-            for fname, content in TEMPLATES[template].items():
+            for fname, content in files.items():
                 # Имя в шаблоне может содержать подпапку (static/app.js) —
                 # создаём её и передаём владельцу вместе с файлом, иначе
                 # шаблон с вложенностью падал бы на открытии файла.
