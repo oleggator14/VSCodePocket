@@ -1536,7 +1536,14 @@
 
   <div class="hint" id="hint"></div>
 
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<!-- Единственный внешний ресурс на всю страницу, и он блокирующий: пока
+     telegram.org не ответит, парсер стоит и НИЧЕГО после этой строки не
+     выполняется. Форма входа лежит в разметке выше — поэтому при недоступном
+     telegram.org человек видел ровно её и вечное ожидание. У части
+     пользователей домен режет провайдер.
+     Ставим async: SDK подключается, но больше никого не держит. Данные входа
+     мы и без него достанем — Telegram кладёт их в адрес страницы. -->
+<script async src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="vendor/xterm.min.js"></script>
 <script src="vendor/xterm-addon-fit.min.js"></script>
 <script src="vendor/codemirror.min.js"></script>
@@ -3956,10 +3963,39 @@ function updateAiHeader(){
 }
 
 /* ═══ старт: Telegram Mini App или обычный веб ═══ */
+
+/* Данные входа Telegram кладёт в адрес страницы (#tgWebAppData=…) — SDK их
+   оттуда и читает. Достаём сами, чтобы вход работал даже когда telegram.org
+   недоступен и SDK не загрузился. Значение сохраняем: адрес живёт до первой
+   навигации, а перезагрузить страницу человек может когда угодно. */
+function tgInitData(){
+  try{
+    const sdk = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData;
+    if(sdk && sdk.length>10){ try{sessionStorage.setItem('cp_tg_init',sdk);}catch(_){} return sdk; }
+  }catch(e){}
+  try{
+    const h=(location.hash||'').replace(/^#/,'');
+    if(h.indexOf('tgWebAppData=')>=0){
+      const v=new URLSearchParams(h).get('tgWebAppData');
+      if(v&&v.length>10){ try{sessionStorage.setItem('cp_tg_init',v);}catch(_){} return v; }
+    }
+  }catch(e){}
+  try{ return sessionStorage.getItem('cp_tg_init')||''; }catch(e){ return ''; }
+}
+/* Мы внутри Telegram, даже если SDK ещё не подъехал: об этом говорит адрес. */
+function inTelegram(){
+  try{
+    if(window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) return true;
+    if((location.hash||'').indexOf('tgWebApp')>=0) return true;
+    return !!sessionStorage.getItem('cp_tg_init');
+  }catch(e){ return false; }
+}
+
 (function(){
   const tg = window.Telegram && window.Telegram.WebApp;
   if(tg){ try{ tg.ready(); tg.expand(); if(tg.setHeaderColor)tg.setHeaderColor('#0a0c10'); if(tg.setBackgroundColor)tg.setBackgroundColor('#0a0c10'); }catch(e){} }
-  const inTg = tg && tg.initData && tg.initData.length>10;
+  const initData = tgInitData();
+  const inTg = initData.length>10;
   if(inTg){
     // В Telegram форму регистрации не показываем вообще, пока вход не отказал:
     // экран входа виден по умолчанию, и на время запроса человек успевал
@@ -3973,17 +4009,29 @@ function updateAiHeader(){
       auth.appendChild(w);
     }
     const dropWait=()=>{const w=$('authWait');if(w)w.remove();if(form)form.classList.remove('hidden');};
-    api('api/tg-login',{method:'POST',body:JSON.stringify({initData:tg.initData})})
+    api('api/tg-login',{method:'POST',body:JSON.stringify({initData:initData})})
       .then(()=>{dropWait();boot();})
       .catch(err=>{
         // вход не прошёл — только теперь показываем форму и объясняем причину
         dropWait();
         try{
-          const u=tg.initDataUnsafe&&tg.initDataUnsafe.user;
+          let u=(tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user)||null;if(!u){try{u=JSON.parse(new URLSearchParams(initData).get('user')||'null');}catch(_){}}
           $('aErr').textContent=((err&&err.message)?err.message:'Не удалось войти через Telegram')+(u&&u.id?(' · ваш Telegram ID: '+u.id):'');
         }catch(e){}
         api('api/me').then(r=>{if(r.user)boot();}).catch(()=>{});
       });
+  }else if(inTelegram()){
+    // Мы внутри Telegram, но initData пустой. Так бывает, когда кнопка бота
+    // заведена обычной ссылкой вместо web_app, или клиент не передал данные.
+    // Раньше этот случай молча падал в обычную веб-форму: человек видел
+    // «введите инвайт-код», а на сервер не уходило вообще ничего — в аудите
+    // пусто, объяснить нечем. Теперь состояние названо своим именем.
+    api('api/me').then(r=>{
+      if(r.user){boot();return;}
+      const e=$('aErr');
+      if(e)e.textContent='Telegram не передал данные для входа (initData пуст). '+
+        'Откройте приложение кнопкой меню бота, а не ссылкой.';
+    }).catch(()=>{});
   }else{
     api('api/me').then(r=>{if(r.user)boot();}).catch(()=>{});
   }

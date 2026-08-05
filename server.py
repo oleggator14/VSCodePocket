@@ -2271,34 +2271,55 @@ def install_ai_on_server(server):
 
 
 def verify_telegram_init_data(init_data, max_age=86400):
+    """Совместимая обёртка: только пользователь или None."""
+    user, _ = check_telegram_init_data(init_data, max_age)
+    return user
+
+
+def check_telegram_init_data(init_data, max_age=86400):
     """Проверяет подпись Telegram WebApp initData (по документации Telegram).
-    Возвращает dict пользователя Telegram или None, если подпись неверна."""
-    if not TG_BOT_TOKEN or not init_data:
-        return None
+
+    Возвращает (пользователь, причина_отказа). Причина нужна, чтобы неудачный
+    вход было видно в аудит-логе: раньше любой отказ выглядел одинаково —
+    «не удалось проверить подпись» — и понять, дело в токене бота, в протухших
+    данных или в подписи, было нельзя.
+
+    Возраст данных мерим по auth_date. Telegram отдаёт initData один раз при
+    открытии, а WebView может держать страницу сутками и переиспользовать
+    старое значение — такие попытки честно отбиваем как stale."""
+    if not TG_BOT_TOKEN:
+        return None, "нет TG_BOT_TOKEN на сервере"
+    if not init_data:
+        return None, "пустой initData"
     try:
         from urllib.parse import parse_qsl
         data = dict(parse_qsl(init_data, keep_blank_values=True))
     except Exception:
-        return None
+        return None, "initData не разбирается"
     their_hash = data.pop("hash", None)
     if not their_hash:
-        return None
+        return None, "в initData нет hash"
+    # signature — поле сторонней валидации Telegram, в подписи бота не участвует
+    data.pop("signature", None)
     try:
         auth_date = int(data.get("auth_date", "0"))
     except ValueError:
         auth_date = 0
-    if max_age and auth_date and (time.time() - auth_date) > max_age:
-        return None  # данные слишком старые
+    age = int(time.time() - auth_date) if auth_date else -1
+    if max_age and auth_date and age > max_age:
+        return None, "данные устарели (%d ч)" % (age // 3600)
     check_string = "\n".join("%s=%s" % (k, data[k]) for k in sorted(data))
     secret = hmac.new(b"WebAppData", TG_BOT_TOKEN.encode(), hashlib.sha256).digest()
     calc = hmac.new(secret, check_string.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(calc, their_hash):
-        return None
+        return None, "подпись не сошлась (проверьте, что TG_BOT_TOKEN от того же бота)"
     try:
         user = json.loads(data.get("user", "") or "{}")
     except (ValueError, json.JSONDecodeError):
         user = {}
-    return user if user.get("id") else None
+    if not user.get("id"):
+        return None, "в initData нет пользователя"
+    return user, None
 
 
 def set_winsize(fd, rows, cols):
@@ -4086,9 +4107,14 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self._body() or b"{}")
         except (ValueError, json.JSONDecodeError):
             return self._err("плохой JSON")
-        tg_user = verify_telegram_init_data(data.get("initData") or "")
+        raw = data.get("initData") or ""
+        tg_user, why = check_telegram_init_data(raw)
         if not tg_user:
-            return self._err("не удалось проверить подпись Telegram", 403)
+            # Неудачный вход раньше нигде не фиксировался: в аудите были только
+            # успехи, и «у меня просит инвайт-код» нечем было объяснить.
+            audit("tg_login_fail", reason=why, ip=ip, initdata_len=len(raw),
+                  ua=self.headers.get("User-Agent", "")[:80])
+            return self._err("Telegram: " + (why or "подпись не проверена"), 403)
         tg_id = str(tg_user["id"])
         token = None
         username = None
@@ -4101,6 +4127,8 @@ class Handler(BaseHTTPRequestHandler):
             if not username:
                 # доступ: если задан белый список — пускаем только его; иначе всем
                 if TG_ALLOWED_IDS and tg_id not in TG_ALLOWED_IDS:
+                    audit("tg_login_fail", reason="ID не в TG_ALLOWED_IDS",
+                          tg_id=tg_id, ip=ip)
                     return self._err("Telegram ID " + tg_id + " не в списке "
                                      "разрешённых на сервере", 403)
                 # роль: разработчик (dev) — только у админов; первый вошедший при
