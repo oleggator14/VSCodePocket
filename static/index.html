@@ -91,7 +91,11 @@
   body{position:fixed;left:0;right:0;top:0;height:var(--vh,100vh);overflow:hidden;
     background:var(--bg);color:var(--fg);font-family:var(--font);
     font-size:var(--t-md);-webkit-font-smoothing:antialiased;
-    display:flex;flex-direction:column}
+    display:flex;flex-direction:column;
+    /* страница сама не тянется наружу. touch-action здесь НЕ ставим: он
+       действует и на потомков, и прокрутка чата, дерева файлов и модалок
+       перестала бы работать. */
+    overscroll-behavior:none}
   /* пока печатаем команду — прячем таббар, чтобы терминал и клавиши сидели
      ровно над клавиатурой */
   body.kbd .tabbar{display:none}
@@ -373,7 +377,7 @@
     flex-direction:column;gap:var(--s2)}
 
   /* ── 6. Экран «Главная» ─────────────────────────────────────────────── */
-  .home-scroll{flex:1;overflow:auto;
+  .home-scroll{flex:1;overflow:auto;overscroll-behavior:contain;
     padding:2px var(--s4) calc(var(--s5) + env(safe-area-inset-bottom));
     display:flex;flex-direction:column;gap:var(--s4)}
   /* Внутренние блоки Главной раскладкой не управлялись вообще: список,
@@ -529,7 +533,7 @@
   .drawer-head{display:flex;align-items:center;gap:2px;padding:var(--s3) var(--s2) var(--s1) var(--s4)}
   .drawer-head h3{font-size:var(--t-xs);letter-spacing:.1em;color:var(--dim);
     font-weight:700;flex:1;overflow:hidden;text-overflow:ellipsis}
-  .ftree{overflow:auto;font-size:var(--t-sm);font-family:var(--mono);flex:1;
+  .ftree{overflow:auto;overscroll-behavior:contain;font-size:var(--t-sm);font-family:var(--mono);flex:1;
     padding-bottom:var(--s5)}
   .fitem{min-height:42px;padding:0 var(--s2) 0 var(--s4);display:flex;gap:var(--s2);
     align-items:center;cursor:pointer}
@@ -558,6 +562,18 @@
     min-height:44px}
   #s-term .term-wrap{flex:1;height:auto}
   #term{position:absolute;inset:0;padding:var(--s1) var(--s2)}
+  /* Прокрутка терминала. Без этих правил жест внутри терминала «протекал»
+     наружу: тянулась вся страница вместе с курсором и панелями, а не вывод
+     команд. overscroll-behavior обрывает цепочку на границе терминала,
+     touch-action оставляет ему вертикальный жест, -webkit-overflow-scrolling
+     даёт инерцию как в родных приложениях. */
+  .xterm-viewport{overscroll-behavior:contain !important;
+    -webkit-overflow-scrolling:touch;touch-action:pan-y;
+    scrollbar-width:thin;scrollbar-color:var(--border-2) transparent}
+  .xterm-viewport::-webkit-scrollbar{width:5px}
+  .xterm-viewport::-webkit-scrollbar-thumb{background:var(--border-2);border-radius:3px}
+  .xterm-screen{touch-action:pan-y}
+  .term-wrap{overscroll-behavior:contain}
   .reconnect{position:absolute;inset:0;display:none;align-items:center;
     justify-content:center;background:rgba(16,17,20,.92);z-index:5}
   .reconnect button{min-height:var(--tap);padding:0 var(--s5);border:1px solid var(--border);
@@ -594,14 +610,21 @@
      иначе они складываются с системной клавиатурой, терминал сжимается до
      пары строк, и непонятно, как из этого выйти. Вместо них одна компактная
      строка вплотную над полем ввода. */
+  /* Строка делится на две части: клавиши прокручиваются в СВОЁМ контейнере,
+     кнопка «скрыть» лежит рядом и вне прокрутки. Раньше она была sticky
+     внутри общей прокрутки, и клавиши уезжали ей под низ. */
   .kbdbar{display:none;gap:var(--s2);align-items:center;
     padding:var(--s2) var(--s3);background:var(--bg);
-    border-top:1px solid var(--border);overflow-x:auto;flex-shrink:0;
-    scrollbar-width:none}
-  .kbdbar::-webkit-scrollbar{display:none}
+    border-top:1px solid var(--border);flex-shrink:0}
+  .kbdbar-keys{flex:1;min-width:0;display:flex;gap:var(--s2);
+    overflow-x:auto;scrollbar-width:none;
+    /* последний клавише даём дотянуться до края, но не под соседа */
+    scroll-padding-inline-end:var(--s2);
+    -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 16px),transparent);
+    mask-image:linear-gradient(to right,#000 calc(100% - 16px),transparent)}
+  .kbdbar-keys::-webkit-scrollbar{display:none}
   .kbdbar .key{flex:0 0 auto;min-width:46px;height:40px;font-size:var(--t-sm)}
-  .kbd-hide{flex:0 0 auto;margin-left:auto;position:sticky;right:0;
-    width:44px;height:40px;border-radius:var(--r-sm);
+  .kbd-hide{flex:0 0 auto;width:44px;height:40px;border-radius:var(--r-sm);
     background:var(--bg3);color:var(--fg);display:flex;
     align-items:center;justify-content:center}
   .kbd-hide svg{width:20px;height:20px}
@@ -683,7 +706,7 @@
   .pill-btn:active{background:var(--accent-soft);border-color:var(--accent-line)}
   /* совсем узкий экран — подписи прячем, остаются иконки */
   @media (max-width:360px){ .pill-btn span{display:none} .pill-btn{padding:0 10px} }
-  .chat{flex:1;overflow:auto;padding:var(--s4) var(--s4) var(--s3);
+  .chat{flex:1;overflow:auto;overscroll-behavior:contain;padding:var(--s4) var(--s4) var(--s3);
     display:flex;flex-direction:column;gap:var(--s3)}
   /* абзац агента дышит свободнее соседних шагов — так лента не «слипается» */
   .chat>.step:has(.step-t){margin:var(--s1) 0}
@@ -1080,13 +1103,15 @@
          другое незачем — терминалу тогда остаётся две строки. Здесь только то,
          без чего в терминале не обойтись, и явный выход из набора. -->
     <div class="kbdbar" id="kbdBar">
-      <button class="key" data-k="esc">esc</button>
-      <button class="key" data-k="tab">tab</button>
-      <button class="key" data-k="cc">^C</button>
-      <button class="key" data-k="up">▲</button>
-      <button class="key" data-k="down">▼</button>
-      <button class="key" data-k="left">◄</button>
-      <button class="key" data-k="right">►</button>
+      <div class="kbdbar-keys">
+        <button class="key" data-k="esc">esc</button>
+        <button class="key" data-k="tab">tab</button>
+        <button class="key" data-k="cc">^C</button>
+        <button class="key" data-k="up">▲</button>
+        <button class="key" data-k="down">▼</button>
+        <button class="key" data-k="left">◄</button>
+        <button class="key" data-k="right">►</button>
+      </div>
       <button class="kbd-hide" id="kbdHide" title="Скрыть клавиатуру"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
     </div>
     <div class="cmdbar" id="cmdBar">
@@ -2066,7 +2091,6 @@ if($('kbdHide'))$('kbdHide').addEventListener('click',e=>{
   e.preventDefault();
   const a=document.activeElement; if(a&&a.blur)a.blur();
   document.body.classList.remove('kbd');
-  setTimeout(fitViewport,60); setTimeout(fitViewport,300);
 });
 $('ctrlKey').onclick=e=>{e.preventDefault();ctrlArmed=!ctrlArmed;altArmed=false;$('altKey').classList.remove('on');$('ctrlKey').classList.toggle('on',ctrlArmed);};
 $('altKey').onclick=e=>{e.preventDefault();altArmed=!altArmed;ctrlArmed=false;$('ctrlKey').classList.remove('on');$('altKey').classList.toggle('on',altArmed);};
@@ -2677,8 +2701,18 @@ $('pvClose').onclick=()=>$('preview').classList.remove('on');
 $('pvReload').onclick=async()=>{const p=$('pvFrame').dataset.path;if(!p)return;
   try{const r=await api('api/file?path='+encodeURIComponent(p));$('pvFrame').srcdoc=r.content;}catch(e){}};
 
-// высота под реальную видимую область (учитываем клавиатуру и панели Safari)
-function fitViewport(){
+/* Подгонка под реально видимую область (клавиатура, панели Safari).
+
+   Работа разделена надвое, и это ключ к плавности. Клавиатура выезжает не
+   мгновенно: visualViewport шлёт события каждый кадр всю анимацию. Раньше на
+   КАЖДОЕ из них уходили и раскладка, и отправка нового размера окна в
+   WebSocket, и пересчёт CodeMirror — десятки раз за полсекунды, отсюда рывки.
+   Теперь дешёвое (высота и сдвиг) идёт раз в кадр через rAF, а дорогое
+   (resize терминала, refresh редактора) — один раз, когда движение улеглось. */
+let _vpFrame=0, _vpSettle=0;
+
+function applyViewport(){
+  _vpFrame=0;
   const vv=window.visualViewport;
   const h=vv?vv.height:window.innerHeight;
   const top=vv?vv.offsetTop:0;
@@ -2686,18 +2720,28 @@ function fitViewport(){
   // прижимаем body ровно к видимой области (учитывая сдвиг под клавиатурой)
   document.body.style.top=top+'px';
   if(window.scrollY||window.scrollX)window.scrollTo(0,0);
-  sendResize();if(cm)cm.refresh();
 }
-if(window.visualViewport){window.visualViewport.addEventListener('resize',fitViewport);window.visualViewport.addEventListener('scroll',fitViewport);}
-window.addEventListener('resize',fitViewport);
+function settleViewport(){
+  _vpSettle=0;
+  sendResize();
+  if(cm)cm.refresh();
+}
+function fitViewport(){
+  if(!_vpFrame)_vpFrame=requestAnimationFrame(applyViewport);
+  clearTimeout(_vpSettle);
+  _vpSettle=setTimeout(settleViewport,140);   // движение прекратилось
+}
+if(window.visualViewport){
+  // passive: браузер не ждёт от нас preventDefault и не тормозит прокрутку
+  window.visualViewport.addEventListener('resize',fitViewport,{passive:true});
+  window.visualViewport.addEventListener('scroll',fitViewport,{passive:true});
+}
+window.addEventListener('resize',fitViewport,{passive:true});
 window.addEventListener('orientationchange',()=>setTimeout(fitViewport,300));
-fitViewport();
+applyViewport(); settleViewport();
 // печать команды: прячем таббар и держим терминал над клавиатурой
-(function(){
-  const ci=$('cmdInput'); if(!ci)return;
-  ci.addEventListener('focus',()=>{document.body.classList.add('kbd');setTimeout(fitViewport,50);setTimeout(fitViewport,300);});
-  ci.addEventListener('blur',()=>{document.body.classList.remove('kbd');setTimeout(fitViewport,50);setTimeout(fitViewport,300);});
-})();
+// Строка команд: класс ставит общий обработчик полей ниже, здесь дублировать
+// нечего. Свои таймеры на fitViewport убраны — они спорили с анимацией.
 
 /* Клавиатура и поля ввода — общее поведение для всего приложения.
    Раньше про клавиатуру знала только строка команд в консоли; в модалках
@@ -2705,30 +2749,31 @@ fitViewport();
    полного экрана, поле уезжало под клавиатуру, а карточка сжимала его
    в полоску. Теперь про клавиатуру знает любое поле. */
 (function(){
-  let openers=0;
   const isField=el=>el&&/^(INPUT|TEXTAREA)$/.test(el.tagName)&&el.type!=='checkbox'&&el.type!=='radio'&&el.type!=='file';
+  let scrollTimer=0;
   document.addEventListener('focusin',e=>{
     if(!isField(e.target))return;
-    openers++;
     document.body.classList.add('kbd');
-    // три замера: клавиатура выезжает не мгновенно и не одинаково быстро
-    [60,220,450].forEach(t=>setTimeout(()=>{
-      fitViewport();
-      // подтягиваем поле в видимую область, если оно оказалось под клавиатурой
+    // Раскладку не трогаем руками: visualViewport сам шлёт события всю
+    // анимацию, а fitViewport сведёт их в один кадр. Раньше здесь стояли три
+    // таймера на 60/220/450 мс — они дёргали пересчёт поверх этих событий и
+    // спорили с движением клавиатуры, отчего оно и выглядело рваным.
+    // Остаётся одно: если поле оказалось под клавиатурой — подтянуть его.
+    clearTimeout(scrollTimer);
+    scrollTimer=setTimeout(()=>{
       try{
         const r=e.target.getBoundingClientRect();
         const vh=(window.visualViewport?window.visualViewport.height:window.innerHeight);
         if(r.bottom>vh-8||r.top<0)e.target.scrollIntoView({block:'center',behavior:'smooth'});
       }catch(_){}
-    },t));
+    },320);
   },true);
   document.addEventListener('focusout',e=>{
     if(!isField(e.target))return;
-    openers=Math.max(0,openers-1);
+    clearTimeout(scrollTimer);
     setTimeout(()=>{
       // класс снимаем, только если фокус не ушёл в соседнее поле
-      if(!isField(document.activeElement)){document.body.classList.remove('kbd');}
-      fitViewport();
+      if(!isField(document.activeElement))document.body.classList.remove('kbd');
     },80);
   },true);
 })();
