@@ -11,13 +11,13 @@ import json
 import os
 import pwd
 import subprocess
-import threading
 import urllib.request
 import urllib.error
 
 API_BASE = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-MODEL = os.environ.get("CP_MODEL", "claude-sonnet-4-5")
+MODEL = os.environ.get("CP_MODEL", "claude-opus-5")
+MAX_TOKENS = int(os.environ.get("CP_MAX_TOKENS", "16000"))
 MAX_STEPS = int(os.environ.get("CP_MAX_STEPS", "12"))      # итераций цикла на 1 сообщение
 CMD_TIMEOUT = int(os.environ.get("CP_CMD_TIMEOUT", "60"))  # сек на команду
 OUT_LIMIT = 12_000                                          # символов вывода команды
@@ -69,6 +69,47 @@ def _demote(username):
     return fn, p
 
 
+def _as_user(username, fn, *args):
+    """Выполняет fn в дочернем процессе под учёткой пользователя и возвращает
+    её результат (строку).
+
+    Нужно для чтения и записи файлов. Проверка пути через _safe() сама по себе
+    не защищает: между realpath() и open() пользователь — а shell у него есть —
+    успевает подменить каталог символьной ссылкой, и root запишет файл куда
+    угодно. Под правами самого пользователя такая подмена ничего не даёт: ядро
+    проверит доступ ещё раз, уже по-настоящему."""
+    r, w = os.pipe()
+    pid = os.fork()
+    if pid == 0:                                  # ребёнок
+        code = 1
+        try:
+            os.close(r)
+            _demote(username)[0]()
+            os.write(w, fn(*args).encode()[:200_000])
+            code = 0
+        except BaseException as e:
+            try:
+                os.write(w, ("ОШИБКА: %s" % e).encode()[:4000])
+            except OSError:
+                pass
+        finally:
+            try:
+                os.close(w)
+            except OSError:
+                pass
+            os._exit(code)
+    os.close(w)
+    chunks = []
+    with os.fdopen(r, "rb") as f:
+        while True:
+            b = f.read(65536)
+            if not b:
+                break
+            chunks.append(b)
+    os.waitpid(pid, 0)
+    return b"".join(chunks).decode("utf-8", errors="replace")
+
+
 class ProjectTools:
     """Исполнение инструментов в папке проекта под учёткой пользователя."""
 
@@ -89,29 +130,41 @@ class ProjectTools:
         return "\n".join(sorted(out)) or "(проект пуст)"
 
     def read_file(self, inp):
-        p = _safe(self.dir, inp.get("path", ""))
-        if not os.path.isfile(p):
-            return f"ОШИБКА: файла нет: {inp.get('path')}"
-        with open(p, "rb") as f:
-            raw = f.read(FILE_LIMIT * 4)
-        if b"\x00" in raw[:8192]:
-            return "ОШИБКА: бинарный файл"
-        text = raw.decode("utf-8", errors="replace")
-        return text[:FILE_LIMIT] + ("\n...(обрезано)" if len(text) > FILE_LIMIT else "")
+        rel = inp.get("path", "")
+        _safe(self.dir, rel)          # ранний отказ с понятным текстом
+
+        def do():
+            p = _safe(self.dir, rel)  # повторно, уже без прав root
+            if not os.path.isfile(p):
+                return f"ОШИБКА: файла нет: {rel}"
+            with open(p, "rb") as f:
+                raw = f.read(FILE_LIMIT * 4)
+            if b"\x00" in raw[:8192]:
+                return "ОШИБКА: бинарный файл"
+            text = raw.decode("utf-8", errors="replace")
+            return text[:FILE_LIMIT] + ("\n...(обрезано)" if len(text) > FILE_LIMIT else "")
+
+        return _as_user(self.user, do)
 
     def write_file(self, inp):
-        p = _safe(self.dir, inp.get("path", ""))
-        os.makedirs(os.path.dirname(p), exist_ok=True)
+        rel = inp.get("path", "")
         content = inp.get("content", "")
-        with open(p, "w", encoding="utf-8") as f:
-            f.write(content)
-        info = pwd.getpwnam(self.user)
-        os.chown(p, info.pw_uid, info.pw_gid)
-        d = os.path.dirname(p)
-        while d.startswith(os.path.realpath(self.dir)) and d != os.path.realpath(self.dir):
-            os.chown(d, info.pw_uid, info.pw_gid)
-            d = os.path.dirname(d)
-        return f"OK: записано {len(content)} символов в {inp.get('path')}"
+        _safe(self.dir, rel)
+
+        def do():
+            p = _safe(self.dir, rel)
+            d = os.path.dirname(p)
+            if d:
+                os.makedirs(d, exist_ok=True)
+            # O_NOFOLLOW: если на месте файла оказалась ссылка наружу —
+            # отказываемся, а не идём по ней
+            fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+                         0o644)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            return f"OK: записано {len(content)} символов в {rel}"
+
+        return _as_user(self.user, do)
 
     def run_command(self, inp):
         cmd = inp.get("command", "")
@@ -146,7 +199,9 @@ def _api_call(messages):
     """Один вызов Anthropic Messages API. Возвращает распарсенный JSON."""
     body = json.dumps({
         "model": MODEL,
-        "max_tokens": 4096,
+        # у текущих моделей размышления включены по умолчанию и считаются в
+        # тот же лимит, что и ответ: при 4096 ответ обрывался на полуслове
+        "max_tokens": MAX_TOKENS,
         "system": SYSTEM_PROMPT,
         "tools": TOOLS,
         "messages": messages,

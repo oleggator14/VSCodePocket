@@ -15,6 +15,7 @@ claude-ide — мини-IDE для команды: редактор + терми
 """
 
 import base64
+import binascii
 import fcntl
 import hashlib
 import hmac
@@ -29,6 +30,7 @@ import shlex
 import shutil
 import signal
 import socket
+import stat
 import struct
 import subprocess
 import tempfile
@@ -131,12 +133,15 @@ def rate_ok(key, limit, window):
 
 
 def audit(event, **kw):
-    """Пишет строку в аудит-лог входов/регистраций/подключений."""
+    """Пишет строку в аудит-лог входов/регистраций/подключений.
+    Лог содержит имена и IP — открываем строго 0600."""
     try:
-        os.makedirs(DATA_DIR, exist_ok=True)
+        os.makedirs(DATA_DIR, mode=0o700, exist_ok=True)
         line = json.dumps({"ts": int(time.time()), "event": event, **kw},
                           ensure_ascii=False)
-        with open(os.path.join(DATA_DIR, "audit.log"), "a") as f:
+        path = os.path.join(DATA_DIR, "audit.log")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a") as f:
             f.write(line + "\n")
     except OSError:
         pass
@@ -169,13 +174,32 @@ def db_load():
         return {"users": {}, "sessions": {}}
 
 
+def write_private(path, data, mode=0o600):
+    """Атомарная запись файла, который с первой секунды доступен только root.
+
+    Раньше временный файл создавался с правами по umask (0644) и права
+    сужались уже ПОСЛЕ подмены — в этом окне users.json с хэшами PIN и
+    шифрованными доступами к серверам мог прочитать любой пользователь
+    машины, а shell у них есть."""
+    os.makedirs(os.path.dirname(path) or ".", mode=0o700, exist_ok=True)
+    tmp = path + ".tmp"
+    if isinstance(data, str):
+        data = data.encode()
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    os.replace(tmp, path)
+
+
 def db_save(db):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    tmp = _db_path() + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(db, f, indent=1)
-    os.replace(tmp, _db_path())
-    os.chmod(_db_path(), 0o600)
+    write_private(_db_path(), json.dumps(db, indent=1, ensure_ascii=False))
 
 
 def hash_pin(pin, salt):
@@ -290,13 +314,19 @@ def _geo_load_disk():
 
 def _geo_save_disk():
     try:
-        os.makedirs(DATA_DIR, exist_ok=True)
-        tmp = _geo_path() + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(_geo_cache, f)
-        os.replace(tmp, _geo_path())
+        # кэш привязан к IP пользователей — не отдаём его остальным на машине
+        write_private(_geo_path(), json.dumps(_geo_cache, ensure_ascii=False))
     except OSError:
         pass
+
+
+def _is_trusted_proxy(ip):
+    """Наш ли это обратный прокси. Приложение слушает 127.0.0.1 и стоит за
+    Caddy на той же машине, поэтому доверяем только петле."""
+    try:
+        return ipaddress.ip_address(ip).is_loopback
+    except ValueError:
+        return False
 
 
 def _ip_public(ip):
@@ -409,7 +439,10 @@ def ensure_projects_dir(username):
 
 
 def user_role(db, username):
-    return (db["users"].get(username) or {}).get("role", "dev")
+    # По умолчанию — обычный участник. Раньше здесь было "dev", и любая запись
+    # без поля role молча получала права администратора: ровно это происходило
+    # бы при переносе базы из старой claude-ide, где роли ещё не было.
+    return (db["users"].get(username) or {}).get("role", "user")
 
 
 def role_quota(role):
@@ -424,7 +457,7 @@ def quota_state(db, username):
     if usage.get("date") != today:
         usage = {"date": today, "tokens": 0}
         u["usage"] = usage
-    return usage.get("tokens", 0), role_quota(u.get("role", "dev"))
+    return usage.get("tokens", 0), role_quota(u.get("role", "user"))
 
 
 def quota_add(username, tokens):
@@ -435,9 +468,23 @@ def quota_add(username, tokens):
         db_save(db)
 
 
+AGENTS = ("claude", "codex")
+
+
+def norm_agent(agent):
+    """Имя агента, приведённое к известному списку. Всё неизвестное — claude.
+    Значение приходит из запроса и попадает в имя файла, поэтому свободный
+    текст сюда пускать нельзя."""
+    return agent if agent in AGENTS else "claude"
+
+
 def chat_path(username, project, agent="claude"):
+    # оба куска идут в путь: проект проверяем регуляркой, агента — списком
+    if not PROJECT_RE.match(project or ""):
+        raise ValueError("плохое имя проекта")
+    agent = norm_agent(agent)
     d = os.path.join(DATA_DIR, "chats", username)
-    os.makedirs(d, exist_ok=True)
+    os.makedirs(d, mode=0o700, exist_ok=True)
     suffix = "" if agent == "claude" else "." + agent   # claude — старый файл
     return os.path.join(d, project + suffix + ".json")
 
@@ -460,11 +507,8 @@ def chat_save(username, project, data, agent="claude"):
     # пишем атомарно: сначала во временный файл, потом подменяем. Иначе обрыв
     # или параллельная запись оставляют обрезанный JSON — а он читается как
     # пустая история, то есть переписка «пропадает».
-    path = chat_path(username, project, agent)
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(data, f, ensure_ascii=False)
-    os.replace(tmp, path)
+    write_private(chat_path(username, project, agent),
+                  json.dumps(data, ensure_ascii=False))
 
 
 def chat_update(username, project, agent, apply_fn):
@@ -559,9 +603,18 @@ def lint_python(username, code):
     try:
         os.write(fd, code.encode())
         os.close(fd)
-        os.chmod(tmp, 0o644)
+        # 0640 и группа пользователя: читает только он сам, а не все на машине
+        try:
+            os.chown(tmp, 0, gid)
+            os.chmod(tmp, 0o640)
+        except OSError:
+            os.chmod(tmp, 0o600)
 
         def demote():
+            # setgroups ОБЯЗАТЕЛЕН и обязан идти первым: без него дочерний
+            # процесс сохраняет дополнительные группы root и остаётся в них
+            # даже после setuid
+            os.setgroups([])
             os.setgid(gid)
             os.setuid(uid)
 
@@ -628,10 +681,8 @@ def _server_secret_key():
             _srv_key_cache = f.read()
     except FileNotFoundError:
         _srv_key_cache = secrets.token_bytes(32)
-        os.makedirs(DATA_DIR, exist_ok=True)
-        with open(path, "wb") as f:
-            f.write(_srv_key_cache)
-        os.chmod(path, 0o600)
+        # 0600 с момента создания, а не после записи
+        write_private(path, _srv_key_cache)
     return _srv_key_cache
 
 
@@ -661,19 +712,69 @@ def enc_secret(plaintext):
 
 
 def dec_secret(blob):
+    """Расшифровывает строку, записанную enc_secret. Формат один:
+    0x01 | nonce(16) | ct | HMAC-SHA256(32). Не сошёлся тег — данные повреждены
+    или подделаны, и мы отказываемся их читать.
+
+    Прежняя версия при неверном теге молча падала в старый формат без проверки
+    целостности — то есть аутентификацию можно было обойти, просто испортив
+    тег. Записи старого формата переводятся разово (migrate_secrets)."""
     raw = base64.b64decode(blob)
-    # новый формат с проверкой целостности: 0x01 | nonce(16) | ct | tag(32)
-    if raw[:1] == b"\x01" and len(raw) >= 1 + 16 + 32:
-        nonce, tag, ct = raw[1:17], raw[-32:], raw[17:-32]
-        expect = hmac.new(_mac_key(), nonce + ct, hashlib.sha256).digest()
-        if hmac.compare_digest(expect, tag):
-            return bytes(a ^ b for a, b in zip(ct, _keystream(nonce, len(ct)))).decode()
-        # тег не сошёлся — возможно, это старый формат, где первый байт случайно 0x01;
-        # пробуем прочитать как legacy (ниже). Реально подделанные данные дадут мусор,
-        # но запись в БД доступна только root, так что это защита «в глубину».
-    # старый формат (без тега) — читаем для обратной совместимости
+    if raw[:1] != b"\x01" or len(raw) < 1 + 16 + 32:
+        raise ValueError("секрет в неизвестном формате")
+    nonce, tag, ct = raw[1:17], raw[-32:], raw[17:-32]
+    expect = hmac.new(_mac_key(), nonce + ct, hashlib.sha256).digest()
+    if not hmac.compare_digest(expect, tag):
+        raise ValueError("секрет повреждён или подделан")
+    return bytes(a ^ b for a, b in zip(ct, _keystream(nonce, len(ct)))).decode()
+
+
+def _dec_legacy(blob):
+    """Чтение старого формата без тега — только для разовой миграции."""
+    raw = base64.b64decode(blob)
     nonce, ct = raw[:16], raw[16:]
     return bytes(a ^ b for a, b in zip(ct, _keystream(nonce, len(ct)))).decode()
+
+
+def migrate_secrets():
+    """Переводит секреты старого формата (без HMAC) в новый. Выполняется один
+    раз при старте: после этого dec_secret работает только с проверкой тега."""
+    fields = ("ai_claude_key", "ai_codex_key")
+    moved = 0
+    with _lock:
+        db = db_load()
+        for urec in db.get("users", {}).values():
+            for srv in urec.get("servers") or ():
+                blob = srv.get("secret")
+                if not blob:
+                    continue
+                try:
+                    dec_secret(blob)
+                    continue                      # уже новый формат
+                except (ValueError, binascii.Error):
+                    pass
+                try:
+                    srv["secret"] = enc_secret(_dec_legacy(blob))
+                    moved += 1
+                except (ValueError, UnicodeDecodeError, binascii.Error):
+                    pass                          # не расшифровался — оставляем как есть
+            for f in fields:
+                blob = urec.get(f)
+                if not blob:
+                    continue
+                try:
+                    dec_secret(blob)
+                    continue
+                except (ValueError, binascii.Error):
+                    pass
+                try:
+                    urec[f] = enc_secret(_dec_legacy(blob))
+                    moved += 1
+                except (ValueError, UnicodeDecodeError, binascii.Error):
+                    pass
+        if moved:
+            db_save(db)
+    return moved
 
 
 def user_servers(db, username):
@@ -841,11 +942,7 @@ def limits_save(new):
     for k, (lo, hi) in _LIMIT_BOUNDS.items():
         if k in new and isinstance(new[k], (int, float)):
             L[k] = max(lo, min(hi, int(new[k])))
-    os.makedirs(DATA_DIR, exist_ok=True)
-    tmp = _limits_path() + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(L, f, indent=1)
-    os.replace(tmp, _limits_path())
+    write_private(_limits_path(), json.dumps(L, indent=1), mode=0o644)
     return L
 
 
@@ -997,6 +1094,7 @@ def spawn_ssh(username, server):
     port = str(server.get("port") or 22)
     ruser = server["user"]
     auth = server["auth"]
+    # ValueError здесь ловит вызывающий (_handle_ws) и показывает понятный текст
     secret = dec_secret(server["secret"])
 
     keyfile = None
@@ -1097,7 +1195,7 @@ def _mkstemp_for(uid, gid, home):
 # ровно та ложная тревога «Сервер не отвечает по SSH», хотя сервер жив.
 _SSH_NOISE = ("control socket", "controlpath", "muxserver", "mux_client",
               "control master", "multiplex", "disabling multiplexing",
-              "no such file or directory: /tmp/cpmux",
+              "no such file or directory: " + os.path.join(DATA_DIR, "mux"),
               "warning: permanently added", "pseudo-terminal will not be allocated")
 
 
@@ -1233,6 +1331,30 @@ def progress_get(username, since=0):
                 "steps": [s for s in p["steps"] if s.get("n", 0) > since]}
 
 
+def _mux_dir():
+    """Каталог для управляющих сокетов SSH: только root, права 0700.
+
+    Живёт в DATA_DIR, а не в /tmp: /tmp общий и доступен на запись всем
+    пользователям сервера, поэтому предсказуемое имя там позволяет подложить
+    свой каталог или ссылку и подключиться к чужому мастер-соединению.
+    Возвращает путь или None, если безопасный каталог получить не удалось —
+    тогда вызывающий код работает без мультиплексирования."""
+    path = os.path.join(DATA_DIR, "mux")
+    try:
+        os.makedirs(path, mode=0o700, exist_ok=True)
+        st = os.lstat(path)
+        # каталог, наш, и никто посторонний в него не пишет
+        if (not stat.S_ISDIR(st.st_mode) or st.st_uid != 0
+                or st.st_mode & 0o077):
+            os.chmod(path, 0o700)
+            st = os.lstat(path)
+            if not stat.S_ISDIR(st.st_mode) or st.st_uid != 0:
+                return None
+        return path
+    except OSError:
+        return None
+
+
 def ssh_exec(server, remote_cmd, stdin_bytes=None, timeout=300, on_line=None):
     """Выполнить команду на сервере пользователя по SSH, вернуть (rc, out, err).
     on_line(bytes) — если задан, вызывается на каждую строку stdout по мере её
@@ -1241,17 +1363,23 @@ def ssh_exec(server, remote_cmd, stdin_bytes=None, timeout=300, on_line=None):
     port = str(server.get("port") or 22)
     ruser = server["user"]
     auth = server["auth"]
-    secret = dec_secret(server["secret"])
+    try:
+        secret = dec_secret(server["secret"])
+    except (ValueError, binascii.Error, UnicodeDecodeError):
+        return 255, b"", ("ssh: сохранённый доступ к серверу не читается — "
+                          "задайте его заново в разделе «Серверы»").encode()
     d = tempfile.mkdtemp(prefix="cpssh_")
     known = os.path.join(d, "known")
     # мультиплексирование: держим ОДНО подключение и переиспользуем его для всех
     # команд (история, Codex, файлы). Меньше новых коннектов → сервер/файрвол
     # (fail2ban) не отбивает по «слишком много подключений».
-    mux = "/tmp/cpmux"
-    try:
-        os.makedirs(mux, exist_ok=True)
-        os.chmod(mux, 0o700)
-    except OSError:
+    #
+    # Каталог сокетов лежит в DATA_DIR (владелец root, 0700), а НЕ в /tmp:
+    # у пользователей на этой машине есть shell, а предсказуемый путь в общем
+    # /tmp позволял бы подложить туда свой каталог или символьную ссылку и
+    # перехватить чужое мастер-соединение SSH (то есть доступ к чужим серверам).
+    mux = _mux_dir()
+    if mux is None:
         mux = d
     # ВАЖНО: ControlMaster=auto здесь ставить нельзя. Тогда первая же команда сама
     # становится мастером, уходит в фон по ControlPersist и уносит с собой наши
@@ -1301,7 +1429,6 @@ def ssh_exec(server, remote_cmd, stdin_bytes=None, timeout=300, on_line=None):
                     # читаем вывод построчно, пока команда идёт — так приложение
                     # показывает работу агента в реальном времени, а не в конце
                     chunks, errbuf = [], []
-                    tstop = threading.Event()
 
                     def _drain_err():
                         try:
@@ -1784,9 +1911,15 @@ def remote_pull_project(server, proj, local_dir, uid, gid):
     if not out:
         return
     try:
-        subprocess.run(["tar", "xzf", "-", "-C", local_dir], input=out,
-                       capture_output=True, timeout=60)
-        subprocess.run(["chown", "-R", "%d:%d" % (uid, gid), local_dir],
+        # Архив приходит с чужой машины, поэтому распаковываем его максимально
+        # недоверчиво: без абсолютных путей и «..», не наследуя владельца и
+        # права из архива, и не следуя за символьными ссылками наружу.
+        subprocess.run(["tar", "xzf", "-", "-C", local_dir,
+                        "--no-absolute-names", "--no-same-owner",
+                        "--no-same-permissions", "--no-overwrite-dir",
+                        "--exclude=../*", "--exclude=/*"],
+                       input=out, capture_output=True, timeout=60)
+        subprocess.run(["chown", "-RhP", "%d:%d" % (uid, gid), local_dir],
                        capture_output=True, timeout=30)
     except (subprocess.SubprocessError, OSError):
         pass
@@ -2142,7 +2275,14 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"error": msg}, code)
 
     def _body(self):
-        n = int(self.headers.get("Content-Length") or 0)
+        # Content-Length приходит от клиента: без нижней границы "-1" превращал
+        # read() в чтение до конца соединения, то есть в способ съесть память
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            raise ValueError("плохой Content-Length")
+        if n < 0:
+            raise ValueError("плохой Content-Length")
         if n > MAX_FILE_SIZE + 4096:
             raise ValueError("слишком большое тело запроса")
         return self.rfile.read(n)
@@ -2160,7 +2300,11 @@ class Handler(BaseHTTPRequestHandler):
     # --- статика ---
     def _serve_static(self, relpath):
         path = os.path.realpath(os.path.join(STATIC_DIR, relpath.lstrip("/")))
-        if not path.startswith(os.path.realpath(STATIC_DIR)) or not os.path.isfile(path):
+        root = os.path.realpath(STATIC_DIR)
+        # сравниваем с разделителем: иначе каталог-сосед вида static-old
+        # проходит проверку по префиксу
+        if (path != root and not path.startswith(root + os.sep)) \
+                or not os.path.isfile(path):
             self._err("не найдено", 404)
             return
         ctype = {
@@ -2388,7 +2532,7 @@ class Handler(BaseHTTPRequestHandler):
                             nproj = 0
                         res = user_resources(name)
                         users.append({
-                            "name": name, "role": u.get("role", "dev"),
+                            "name": name, "role": u.get("role", "user"),
                             "created": u.get("created", 0),
                             "tokens_today": tokens,
                             "projects": nproj,
@@ -2544,6 +2688,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         url = urlparse(self.path)
         p = url.path
+
+        # Все POST меняют состояние. SameSite=Lax уже отсекает межсайтовую
+        # отправку кук, проверка Origin — второй рубеж на тот же случай.
+        if not self._origin_ok():
+            return self._err("запрос с чужого источника", 403)
 
         if p == "/api/register":
             return self._register()
@@ -2950,7 +3099,7 @@ class Handler(BaseHTTPRequestHandler):
             srv = get_server(user, data.get("id"))
             if not srv or not srv.get("workdir"):
                 return self._err("нужна рабочая папка", 400)
-            agent = data.get("agent") or "claude"
+            agent = norm_agent(data.get("agent"))
             wd = srv["workdir"]
             needle = '"' + wd + '"'   # путь в кавычках — как поле cwd в транскриптах
             base_dir = ('"$HOME/.codex"' if agent == "codex"
@@ -3064,7 +3213,7 @@ class Handler(BaseHTTPRequestHandler):
             srv = get_server(user, data.get("id"))
             if not srv:
                 return self._err("сервер не найден", 404)
-            agent = data.get("agent") or "claude"
+            agent = norm_agent(data.get("agent"))
             if agent == "codex":
                 # у Codex сессии лежат в разных местах; исключаем только индекс и
                 # плагиновые фикстуры, history.jsonl оставляем (там бывает переписка)
@@ -3607,9 +3756,12 @@ class Handler(BaseHTTPRequestHandler):
                         should_stop=lambda: agent_cancel_requested(user),
                         images=data.get("images") or None)
                 except RuntimeError as e:
+                    # текст берём в переменную: имя e существует только внутри
+                    # except-блока, а лямбда ссылалась на него напрямую
+                    emsg = str(e)
                     chat_update(user, proj, agent, lambda ch:
-                                ch["ui"].append({"type": "error", "text": str(e)}))
-                    return self._err(str(e), 502)
+                                ch["ui"].append({"type": "error", "text": emsg}))
+                    return self._err(emsg, 502)
                 def _apidone(ch):
                     ch["api"] = api_hist
                     ch["ui"].extend(steps)
@@ -3695,11 +3847,37 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- регистрация и вход ---
     def _client_ip(self):
-        # за прокси Caddy реальный IP в X-Forwarded-For
-        xff = self.headers.get("X-Forwarded-For")
-        if xff:
-            return xff.split(",")[0].strip()
-        return self.client_address[0]
+        """IP клиента. За обратным прокси берём ПОСЛЕДНИЙ элемент
+        X-Forwarded-For — его дописал наш Caddy. Первый элемент присылает сам
+        клиент, и раньше мы брали именно его: подделав заголовок, кто угодно
+        сбрасывал себе счётчик попыток входа и подменял записи в аудит-логе.
+        Заголовку верим только когда соединение пришло от локального прокси."""
+        peer = self.client_address[0]
+        if not _is_trusted_proxy(peer):
+            return peer
+        xff = self.headers.get("X-Forwarded-For") or ""
+        hops = [h.strip() for h in xff.split(",") if h.strip()]
+        return hops[-1] if hops else peer
+
+    def _origin_ok(self):
+        """Пришёл ли запрос с нашей же страницы.
+
+        Cookie сессии помечена SameSite=Lax, но полагаться только на неё для
+        WebSocket-терминала нельзя: цена ошибки — живой shell. Сверяем Origin
+        с Host. Заголовка нет (не-браузерный клиент, curl) — пропускаем:
+        подделать Origin из чужой вкладки браузер всё равно не даёт."""
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        host = (self.headers.get("Host") or "").lower()
+        try:
+            o = urlparse(origin)
+        except ValueError:
+            return False
+        if not o.hostname:
+            return False
+        netloc = o.hostname + (":%d" % o.port if o.port else "")
+        return netloc.lower() == host or o.hostname.lower() == host.split(":")[0]
 
     def _cookie_token(self):
         for part in (self.headers.get("Cookie", "")).split(";"):
@@ -3881,6 +4059,12 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- WebSocket-терминал ---
     def _handle_ws(self):
+        # Origin проверяем ДО авторизации: соединение даёт интерактивный shell,
+        # и открывать его по запросу с чужой страницы нельзя ни при каких куках.
+        if not self._origin_ok():
+            audit("ws_bad_origin", origin=self.headers.get("Origin", ""),
+                  ip=self._client_ip())
+            return self._err("запрос с чужого источника", 403)
         user = session_user(self)
         key = self.headers.get("Sec-WebSocket-Key")
         if not user or not key or \
@@ -3898,6 +4082,14 @@ class Handler(BaseHTTPRequestHandler):
         if not server and not ALLOW_LOCAL_TERMINAL:
             # общий сервер отключён — работа идёт на своём сервере пользователя
             return self._err("добавьте свой сервер — работа идёт на нём", 400)
+        if server:
+            # доступ проверяем ДО рукопожатия: после ответа 101 отдать
+            # осмысленную ошибку по HTTP уже нельзя
+            try:
+                dec_secret(server["secret"])
+            except (ValueError, binascii.Error, UnicodeDecodeError):
+                return self._err("сохранённый доступ к серверу не читается — "
+                                 "задайте его заново в разделе «Серверы»", 400)
 
         # рукопожатие
         resp = ("HTTP/1.1 101 Switching Protocols\r\n"
@@ -4004,7 +4196,10 @@ def main():
                          "или включите IDE_OPEN_SIGNUP=1")
     if os.geteuid() != 0:
         raise SystemExit("Запускать под root: нужен для создания пользователей")
-    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(DATA_DIR, mode=0o700, exist_ok=True)
+    moved = migrate_secrets()
+    if moved:
+        print(f"секретов переведено в формат с проверкой целостности: {moved}")
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     srv.daemon_threads = True
     print(f"claude-ide слушает {HOST}:{PORT}, статика: {STATIC_DIR}")
